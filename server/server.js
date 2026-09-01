@@ -58,7 +58,12 @@ function makeDeck() {
 }
 
 function nextSeat(seat) {
-  return (seat + 1) % 4;
+  const index = Number(seat);
+  return ((Number.isInteger(index) ? index : 0) + 1) % 4;
+}
+
+function stillNeedsBid(player) {
+  return Boolean(player) && !Number.isInteger(player.bid);
 }
 
 function createRoom() {
@@ -257,7 +262,7 @@ function handleBotTurn(room) {
     current.bid = bid;
     room.game.bids[current.seat] = bid;
 
-    const remaining = room.players.filter(Boolean).filter((player) => player.bid === null);
+    const remaining = room.players.filter(stillNeedsBid);
     if (remaining.length === 0) {
       room.game.phase = 'playing';
       room.game.currentSeat = nextSeat(room.game.dealerSeat);
@@ -325,10 +330,11 @@ function dealHand(room, { preserveScores = false } = {}) {
     ? { 0: room.game.totalScores[0] || 0, 1: room.game.totalScores[1] || 0 }
     : { 0: 0, 1: 0 };
   const previousRound = preserveScores && room.game ? room.game.round || 1 : 0;
-  const dealerSeat = preserveScores && room.game ? nextSeat(room.game.dealerSeat) : 0;
+  const dealerSeat = preserveScores && room.game ? nextSeat(room.game.dealerSeat ?? 0) : 0;
 
   const deck = makeDeck();
   room.players.forEach((player, index) => {
+    if (!player) return;
     player.bid = null;
     player.hand = sortHand(deck.splice(0, 13));
     player.ready = true;
@@ -537,13 +543,23 @@ io.on('connection', (socket) => {
 
   socket.on('submitBid', ({ roomCode, bid }) => {
     const room = getRoomByCode(roomCode);
-    if (!room || !room.game || room.game.phase !== 'bidding') return;
+    if (!room || !room.game) {
+      socket.emit('errorMessage', 'No hand is being bid yet.');
+      return;
+    }
+    if (room.game.phase !== 'bidding') {
+      socket.emit('errorMessage', 'Bidding is not open on this hand.');
+      return;
+    }
 
     const player = getPlayerInRoom(room, socket.id);
-    if (!player) return;
-    if (room.game.resolving) return;
-    if (room.game.currentSeat !== player.seat) {
-      socket.emit('errorMessage', 'It is not your turn to bid.');
+    if (!player) {
+      socket.emit('errorMessage', 'You are not seated at this table.');
+      return;
+    }
+    if (Number(room.game.currentSeat) !== Number(player.seat)) {
+      const waiter = room.players[room.game.currentSeat];
+      socket.emit('errorMessage', waiter ? `Wait — it is ${waiter.name}'s bid.` : 'It is not your turn to bid.');
       return;
     }
 
@@ -556,7 +572,7 @@ io.on('connection', (socket) => {
     player.bid = nextBid;
     room.game.bids[player.seat] = nextBid;
 
-    const remainingPlayers = room.players.filter(Boolean).filter((entry) => entry.bid === null);
+    const remainingPlayers = room.players.filter(stillNeedsBid);
     if (remainingPlayers.length === 0) {
       room.game.phase = 'playing';
       room.game.currentSeat = nextSeat(room.game.dealerSeat);

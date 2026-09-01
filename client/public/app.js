@@ -434,9 +434,18 @@ function render() {
     handMeterFillEl.style.width = '100%';
   }
 
-  const bidding = roomState.game && roomState.game.phase === 'bidding' && roomState.game.currentSeat === mySeat;
-  bidBtn.disabled = !bidding;
-  bidSelect.disabled = !bidding;
+  const myPlayer = mySeat == null ? null : roomState.players[mySeat];
+  const biddingOpen = roomState.game && roomState.game.phase === 'bidding';
+  const alreadyBid = myPlayer && Number.isInteger(myPlayer.bid);
+  const isMyBidTurn = biddingOpen && Number(roomState.game.currentSeat) === Number(mySeat);
+  bidSelect.disabled = !isMyBidTurn;
+  bidBtn.disabled = !isMyBidTurn || alreadyBid;
+  if (biddingOpen && !isMyBidTurn && !alreadyBid) {
+    const waiter = roomState.players[roomState.game.currentSeat];
+    if (waiter && gameMessage && !String(gameMessage.textContent || '').includes('bids')) {
+      gameMessage.textContent = `Waiting for ${waiter.name} to bid.`;
+    }
+  }
 
   showTable();
   renderSeats();
