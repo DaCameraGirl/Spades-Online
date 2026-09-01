@@ -295,7 +295,8 @@ function handleBotTurn(room) {
       room.game.leadSuit,
       room.game.spadesBroken,
       room.game.trick,
-      room.game.currentSeat
+      room.game.currentSeat,
+      room.game.bids
     ) || current.hand[0];
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;

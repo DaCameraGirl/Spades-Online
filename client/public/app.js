@@ -305,7 +305,7 @@ function renderSeats() {
         <span class="seat-badge">${badge}</span>
       </div>
       <h4>${player.name}</h4>
-      <p>Bid <strong>${player.bid ?? '—'}</strong> · Tricks <strong>${tricks}</strong></p>
+      <p>Bid <strong>${player.bid === 0 ? 'Nil' : player.bid ?? '—'}</strong> · Tricks <strong>${tricks}</strong></p>
     `;
     tableSeats.appendChild(seatCard);
   });

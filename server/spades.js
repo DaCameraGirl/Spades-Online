@@ -35,11 +35,16 @@ function highest(cards) {
   return [...cards].sort((a, b) => RANK_VALUES[b.rank] - RANK_VALUES[a.rank])[0];
 }
 
-function pickLead(hand, spadesBroken) {
+function partnerSeatOf(seat) {
+  return (Number(seat) + 2) % 4;
+}
+
+function pickLead(hand, spadesBroken, { nil = false } = {}) {
   const legal = !spadesBroken && hand.some((card) => card.suit !== 'Spades')
     ? hand.filter((card) => card.suit !== 'Spades')
     : hand;
   if (!legal.length) return lowest(hand);
+  if (nil) return lowest(legal);
 
   const aces = legal.filter((card) => card.rank === 'A');
   if (aces.length) return aces[0];
@@ -75,23 +80,45 @@ function determineWinner(trickCards, leadSuit) {
   return winner.seat;
 }
 
-function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0) {
+function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0, bids = {}) {
   if (!hand.length) return null;
+
+  const myBid = bids[seat];
+  const pSeat = partnerSeatOf(seat);
+  const partnerBid = bids[pSeat];
+  const isNil = myBid === 0;
+  const partnerNil = partnerBid === 0;
 
   const leading = !leadSuit || !trick.length;
   if (leading) {
-    return pickLead(hand, spadesBroken);
+    return pickLead(hand, spadesBroken, { nil: isNil });
   }
 
   const follow = hand.filter((card) => card.suit === leadSuit);
   const winnerSeat = determineWinner(trick, leadSuit);
   const winnerEntry = trick.find((entry) => entry.seat === winnerSeat);
   const winnerCard = winnerEntry ? winnerEntry.card : null;
+  const nilPartnerWinning = partnerNil && winnerSeat === pSeat;
   const partnerWinning = winnerSeat != null
     && winnerSeat !== seat
-    && teamForSeat(winnerSeat) === teamForSeat(seat);
+    && teamForSeat(winnerSeat) === teamForSeat(seat)
+    && !nilPartnerWinning;
+
+  if (isNil) {
+    if (follow.length) {
+      const under = winnerCard
+        ? follow.filter((card) => !cardBeats(card, winnerCard, leadSuit))
+        : follow;
+      if (under.length) return highest(under);
+      return lowest(follow);
+    }
+    const dump = hand.filter((card) => card.suit !== 'Spades');
+    if (dump.length) return highest(dump);
+    return lowest(hand);
+  }
+
   if (follow.length) {
-    if (!partnerWinning && winnerCard) {
+    if ((!partnerWinning || nilPartnerWinning) && winnerCard) {
       const winners = follow.filter((card) => cardBeats(card, winnerCard, leadSuit));
       if (winners.length) return lowest(winners);
     }
@@ -99,7 +126,7 @@ function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0) {
   }
 
   const spades = hand.filter((card) => card.suit === 'Spades');
-  const shouldTrump = !partnerWinning && winnerCard && spades.length;
+  const shouldTrump = winnerCard && spades.length && (!partnerWinning || nilPartnerWinning);
   if (shouldTrump) {
     const winningTrumps = winnerCard.suit === 'Spades'
       ? spades.filter((card) => RANK_VALUES[card.rank] > RANK_VALUES[winnerCard.rank])
