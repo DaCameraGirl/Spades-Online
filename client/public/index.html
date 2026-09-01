@@ -13,13 +13,17 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <div id="tableCall" class="table-call hidden" aria-live="polite"></div>
     <div class="app-shell">
       <header class="topbar">
         <div>
           <p class="eyebrow">RetroArcade</p>
           <h1>Spades Online</h1>
         </div>
-        <div id="statusBadge" class="status-badge">Offline</div>
+        <div class="header-actions">
+          <button id="soundToggle" type="button" class="sound-toggle" aria-pressed="true">Sound on</button>
+          <div id="statusBadge" class="status-badge">Offline</div>
+        </div>
       </header>
 
       <main class="content">
@@ -162,6 +166,7 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/sounds.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

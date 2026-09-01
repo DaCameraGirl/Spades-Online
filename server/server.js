@@ -384,6 +384,7 @@ function buildPlayerPayload(room, socketId) {
         message: room.game.message,
         tricksWon: room.game.tricksWon || { 0: 0, 1: 0 },
         resolving: Boolean(room.game.resolving),
+        spadesBroken: Boolean(room.game.spadesBroken),
       }
     : null;
 

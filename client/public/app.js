@@ -18,6 +18,8 @@ const createRoomBtn = document.getElementById('createRoomBtn');
 const joinRoomBtn = document.getElementById('joinRoomBtn');
 const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
+const soundToggle = document.getElementById('soundToggle');
+const tableCall = document.getElementById('tableCall');
 const bidSelect = document.getElementById('bidSelect');
 const bidBtn = document.getElementById('bidBtn');
 const handArea = document.getElementById('handArea');
@@ -46,6 +48,8 @@ const SUIT_MARK = {
 let roomState = null;
 let mySeat = null;
 let didAutoJoin = false;
+let lastAudio = null;
+let callTimer = null;
 
 const pendingRoomCode = (new URLSearchParams(window.location.search).get('room') || '').trim().toUpperCase();
 if (pendingRoomCode) {
@@ -63,6 +67,97 @@ function syncRoomUrl(roomCode) {
   const url = new URL(window.location.href);
   url.searchParams.set('room', roomCode);
   window.history.replaceState({}, '', url);
+}
+
+function showTableCall(text) {
+  if (!tableCall || !text) return;
+  tableCall.textContent = text;
+  tableCall.classList.remove('hidden');
+  window.clearTimeout(callTimer);
+  callTimer = window.setTimeout(() => {
+    tableCall.classList.add('hidden');
+  }, 2200);
+}
+
+function bidTotal(players) {
+  return (players || []).reduce((sum, player) => sum + (player && player.bid != null ? 1 : 0), 0);
+}
+
+function trickSignature(trick) {
+  return (trick || []).map((entry) => `${entry.seat}:${entry.card && entry.card.code}`).join('|');
+}
+
+function playTableSounds(nextState) {
+  if (!window.SpadesAudio || !nextState) return;
+  const game = nextState.game;
+  const prev = lastAudio;
+  lastAudio = game
+    ? {
+      phase: game.phase,
+      currentSeat: game.currentSeat,
+      trick: trickSignature(game.trick),
+      trickCount: (game.trick || []).length,
+      resolving: Boolean(game.resolving),
+      spadesBroken: Boolean(game.spadesBroken),
+      bids: bidTotal(nextState.players),
+      mySeat,
+    }
+    : null;
+
+  if (!game) return;
+
+  if (!prev) {
+    if (game.phase === 'bidding') {
+      SpadesAudio.deal();
+      SpadesAudio.say('Bidding is open.');
+      showTableCall('Bidding is open');
+    }
+    return;
+  }
+
+  if (prev.phase !== 'bidding' && game.phase === 'bidding') {
+    SpadesAudio.deal();
+    SpadesAudio.say('Bidding is open.');
+    showTableCall('Bidding is open');
+  }
+
+  if (game.bids && prev.bids < bidTotal(nextState.players)) {
+    SpadesAudio.chip();
+  }
+
+  if (prev.phase === 'bidding' && game.phase === 'playing') {
+    SpadesAudio.say("Let's play.");
+    showTableCall("Let's play");
+  }
+
+  if (!prev.spadesBroken && game.spadesBroken) {
+    SpadesAudio.spadesBroken();
+    showTableCall('Spades are broken');
+  } else if (prev.trick !== trickSignature(game.trick) && (game.trick || []).length > prev.trickCount) {
+    const lastCard = game.trick[game.trick.length - 1];
+    const isTrump = lastCard && lastCard.card && lastCard.card.suit === 'Spades' && game.leadSuit && game.leadSuit !== 'Spades';
+    if (isTrump) SpadesAudio.trump();
+    else SpadesAudio.card();
+  }
+
+  if (!prev.resolving && game.resolving) {
+    SpadesAudio.trickWon();
+  }
+
+  if (game.phase === 'finished' && prev.phase !== 'finished') {
+    SpadesAudio.say('Hand complete.');
+    showTableCall('Hand complete');
+  }
+
+  const becameMyTurn = game.currentSeat === mySeat && prev.currentSeat !== mySeat && !game.resolving;
+  if (becameMyTurn && game.phase === 'bidding') {
+    SpadesAudio.turn();
+    SpadesAudio.say('Your bid.');
+  }
+  if (becameMyTurn && game.phase === 'playing') {
+    SpadesAudio.turn();
+    if (!(game.trick && game.trick.length)) SpadesAudio.say('Your lead.');
+  }
 }
 
 function maybeAutoJoin() {
@@ -339,6 +434,7 @@ socket.on('roomState', (payload) => {
   roomState = payload;
   const myPlayer = roomState.players.find((player) => player && player.isYou);
   mySeat = myPlayer ? myPlayer.seat : null;
+  playTableSounds(roomState);
   render();
 });
 
@@ -347,6 +443,7 @@ socket.on('errorMessage', (message) => {
 });
 
 createRoomBtn.addEventListener('click', () => {
+  if (window.SpadesAudio) SpadesAudio.unlock();
   const name = playerNameInput.value.trim() || 'Host';
   const stake = Number(stakeSelect.value);
   socket.emit('createRoom', { name, stake });
@@ -383,6 +480,22 @@ bidBtn.addEventListener('click', () => {
 roomCodeInput.addEventListener('input', () => {
   roomCodeInput.value = roomCodeInput.value.toUpperCase();
 });
+
+function syncSoundToggle() {
+  if (!soundToggle || !window.SpadesAudio) return;
+  const on = !SpadesAudio.isMuted();
+  soundToggle.textContent = on ? 'Sound on' : 'Sound off';
+  soundToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+if (soundToggle) {
+  syncSoundToggle();
+  soundToggle.addEventListener('click', () => {
+    SpadesAudio.unlock();
+    SpadesAudio.setMuted(!SpadesAudio.isMuted());
+    syncSoundToggle();
+  });
+}
 
 if (copyInviteBtn) {
   copyInviteBtn.addEventListener('click', async () => {

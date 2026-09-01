@@ -17,6 +17,7 @@ A real-time 4-player Spades room starter built for online play from different lo
 - Bots play one card at a time so the trick stays visible
 - Deal the next hand without wiping the score
 - Socket-based multiplayer using Node.js + Socket.IO
+- Table sounds and dealer calls (bidding, your lead, spades broken, hand complete)
 
 ## Run locally
 
