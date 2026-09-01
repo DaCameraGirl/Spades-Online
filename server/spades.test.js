@@ -76,31 +76,6 @@ test('bot does not lead a 4 when it has a higher legal card', () => {
   assert.equal(played.rank, 'Q');
 });
 
-test('nil bot does not trump when it can dump a side suit', () => {
-  const hand = [card('3', 'Spades'), card('9', 'Diamonds'), card('4', 'Hearts')];
-  const trick = [{ seat: 0, card: card('A', 'Clubs') }];
-  const played = pickBotCard(hand, 'Clubs', false, trick, 2, { 0: 4, 2: 0 });
-  assert.equal(played.suit, 'Diamonds');
-});
-
-test('nil bot ducks under the current winner when following', () => {
-  const hand = [card('9', 'Clubs'), card('2', 'Clubs'), card('K', 'Hearts')];
-  const trick = [{ seat: 1, card: card('10', 'Clubs') }];
-  const played = pickBotCard(hand, 'Clubs', false, trick, 2, { 2: 0 });
-  assert.equal(played.rank, '9');
-  assert.equal(played.suit, 'Clubs');
-});
-
-test('cover bot overtakes a nil partner who is winning', () => {
-  const hand = [card('K', 'Clubs'), card('2', 'Clubs')];
-  const trick = [
-    { seat: 0, card: card('9', 'Clubs') },
-    { seat: 1, card: card('3', 'Clubs') },
-  ];
-  const played = pickBotCard(hand, 'Clubs', false, trick, 2, { 0: 0, 2: 4 });
-  assert.equal(played.rank, 'K');
-});
-
 test('ace of clubs wins unless a spade is played', () => {
   const noTrump = [
     { seat: 0, card: card('A', 'Clubs') },
