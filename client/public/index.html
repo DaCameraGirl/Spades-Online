@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RetroArcade Spades</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">RetroArcade</p>
+          <h1>Spades Online</h1>
+        </div>
+        <div id="statusBadge" class="status-badge">Offline</div>
+      </header>
+
+      <main class="content">
+        <section id="lobby" class="panel active">
+          <h2>Create or join a table</h2>
+
+          <div class="auth-row">
+            <label>
+              Your name
+              <input id="playerName" type="text" value="Player 1" maxlength="20" />
+            </label>
+
+            <label>
+              Stake
+              <select id="stakeSelect">
+                <option value="250">250</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+              </select>
+            </label>
+
+            <label>
+              Table style
+              <select id="tableStyleSelect">
+                <option value="green">Green felt</option>
+                <option value="red">Red velvet</option>
+                <option value="midnight">Midnight noir</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="button-row">
+            <button id="createRoomBtn">Create room</button>
+            <div class="join-group">
+              <input id="roomCodeInput" type="text" maxlength="5" placeholder="ROOM CODE" />
+              <button id="joinRoomBtn" class="secondary">Join</button>
+            </div>
+          </div>
+
+          <div id="errorBox" class="error-box hidden"></div>
+        </section>
+
+        <section id="table" class="panel">
+          <div class="table-topbar">
+            <div>
+              <p class="eyebrow">Room code</p>
+              <h3 id="roomCodeLabel">—</h3>
+            </div>
+            <div>
+              <p class="eyebrow">Stake</p>
+              <h3 id="stakeLabel">250</h3>
+            </div>
+            <button id="startGameBtn" class="primary">Start game</button>
+          </div>
+
+          <div class="table-stage">
+            <div class="table-glow"></div>
+            <div class="table-scoreboard">
+              <div class="score-box">
+                <span class="score-label">Team 1</span>
+                <strong id="teamOneScore">0</strong>
+              </div>
+              <div class="score-box center-box">
+                <span class="score-label">Hand</span>
+                <strong id="handMeterValue">13</strong>
+              </div>
+              <div class="score-box">
+                <span class="score-label">Team 2</span>
+                <strong id="teamTwoScore">0</strong>
+              </div>
+            </div>
+
+            <div class="hand-meter-shell">
+              <div class="hand-meter-track">
+                <div id="handMeterFill" class="hand-meter-fill"></div>
+              </div>
+            </div>
+
+            <div class="table-center">
+              <div class="dealer-badge"><span>Dealer</span></div>
+              <div class="pot-box"><span>POT</span><strong id="potValue">$250</strong></div>
+            </div>
+
+            <div class="chip-panel" aria-label="Chips panel">
+              <div class="chip-stack chip-stack-red"><span>250</span></div>
+              <div class="chip-stack chip-stack-gold"><span>500</span></div>
+              <div class="chip-stack chip-stack-blue"><span>1000</span></div>
+            </div>
+
+            <div id="tableSeats" class="table-seats"></div>
+
+            <div class="game-panel">
+              <div class="game-meta">
+                <div>
+                  <p class="eyebrow">Status</p>
+                  <p id="gameMessage">Waiting for players.</p>
+                </div>
+                <div>
+                  <p class="eyebrow">Current turn</p>
+                  <p id="turnLabel">—</p>
+                </div>
+              </div>
+
+              <div id="trickArea" class="trick-area"></div>
+
+              <div class="bid-row">
+                <label for="bidSelect">Bid</label>
+                <select id="bidSelect">
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                  <option value="10">10</option>
+                  <option value="11">11</option>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                </select>
+                <button id="bidBtn" class="secondary">Submit bid</button>
+              </div>
+
+              <div id="handArea" class="hand-area"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

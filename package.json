@@ -1,0 +1,16 @@
+{
+  "name": "retroarcade-spades-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time 4-player Spades game starter for online play",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3"
+  }
+}
