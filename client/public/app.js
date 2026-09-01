@@ -107,7 +107,7 @@ function sortHand(cards) {
   return [...cards].sort((a, b) => {
     const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
     if (suitDiff !== 0) return suitDiff;
-    return rankOrder[a.rank] - rankOrder[b.rank];
+    return rankOrder[b.rank] - rankOrder[a.rank];
   });
 }
 

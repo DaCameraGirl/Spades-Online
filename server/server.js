@@ -19,10 +19,10 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
+const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat } = require('./spades');
+
 const STAKES = [250, 500, 1000];
-const SUITS = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-const RANK_VALUES = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13, A: 14 };
 const BOT_NAMES = ['Buster', 'Lena', 'Drew'];
 const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
@@ -54,18 +54,6 @@ function makeDeck() {
     });
   });
   return shuffle(cards);
-}
-
-function sortHand(hand) {
-  return [...hand].sort((a, b) => {
-    const suitDiff = SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit);
-    if (suitDiff !== 0) return suitDiff;
-    return RANK_VALUES[a.rank] - RANK_VALUES[b.rank];
-  });
-}
-
-function teamForSeat(seat) {
-  return seat % 2 === 0 ? 0 : 1;
 }
 
 function nextSeat(seat) {
@@ -189,20 +177,6 @@ function pickBotBid(hand) {
   return 0;
 }
 
-function pickBotCard(hand, leadSuit, spadesBroken) {
-  const playable = leadSuit ? hand.filter((card) => card.suit === leadSuit) : hand;
-  if (playable.length > 0) {
-    return [...playable].sort((a, b) => RANK_VALUES[a.rank] - RANK_VALUES[b.rank])[0];
-  }
-
-  if (!spadesBroken && hand.some((card) => card.suit !== 'Spades')) {
-    const nonSpades = hand.filter((card) => card.suit !== 'Spades');
-    return [...nonSpades].sort((a, b) => RANK_VALUES[a.rank] - RANK_VALUES[b.rank])[0];
-  }
-
-  return [...hand].sort((a, b) => RANK_VALUES[a.rank] - RANK_VALUES[b.rank])[0];
-}
-
 function continueTurn(room) {
   if (!room || !room.game || room.game.resolving) return;
   if (isBotPlayer(room.players[room.game.currentSeat])) {
@@ -281,7 +255,13 @@ function handleBotTurn(room) {
   }
 
   if (room.game.phase === 'playing') {
-    const card = pickBotCard(current.hand, room.game.leadSuit, room.game.spadesBroken);
+    const card = pickBotCard(
+      current.hand,
+      room.game.leadSuit,
+      room.game.spadesBroken,
+      room.game.trick,
+      current.seat
+    );
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
     current.hand.splice(cardIndex, 1);
@@ -370,36 +350,6 @@ function validCardPlay(player, card, room) {
   }
 
   return true;
-}
-
-function determineWinner(trickCards, leadSuit) {
-  if (!trickCards.length) return null;
-
-  let winner = trickCards[0];
-
-  for (let i = 1; i < trickCards.length; i += 1) {
-    const current = winner.card;
-    const candidate = trickCards[i].card;
-
-    const currentSuit = current.suit;
-    const candidateSuit = candidate.suit;
-
-    const currentWins =
-      (currentSuit === leadSuit && candidateSuit !== leadSuit && candidateSuit !== 'Spades') ||
-      (currentSuit === 'Spades' && candidateSuit !== 'Spades' && candidateSuit !== leadSuit) ||
-      (currentSuit === candidateSuit && RANK_VALUES[current.rank] > RANK_VALUES[candidate.rank]);
-
-    const candidateWins =
-      (candidateSuit === leadSuit && currentSuit !== leadSuit && currentSuit !== 'Spades') ||
-      (candidateSuit === 'Spades' && currentSuit !== 'Spades') ||
-      (candidateSuit === currentSuit && RANK_VALUES[candidate.rank] > RANK_VALUES[current.rank]);
-
-    if (candidateWins && !currentWins) {
-      winner = trickCards[i];
-    }
-  }
-
-  return winner.seat;
 }
 
 function buildPlayerPayload(room, socketId) {
