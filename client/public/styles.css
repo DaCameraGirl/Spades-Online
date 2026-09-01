@@ -235,6 +235,23 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+.room-share {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invite-btn {
+  min-height: 32px;
+  width: fit-content;
+  padding: 6px 10px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  background: rgba(247, 241, 227, 0.08);
+  color: var(--gold);
+  border: 1px solid var(--line);
+}
+
 .table-rail {
   width: min(100%, 980px);
   margin: 0 auto;

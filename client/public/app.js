@@ -1,4 +1,8 @@
-const socket = io();
+const socket = io({
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: 12,
+});
 
 const lobbySection = document.getElementById('lobby');
 const tableSection = document.getElementById('table');
@@ -13,6 +17,7 @@ const tableStyleSelect = document.getElementById('tableStyleSelect');
 const createRoomBtn = document.getElementById('createRoomBtn');
 const joinRoomBtn = document.getElementById('joinRoomBtn');
 const startGameBtn = document.getElementById('startGameBtn');
+const copyInviteBtn = document.getElementById('copyInviteBtn');
 const bidSelect = document.getElementById('bidSelect');
 const bidBtn = document.getElementById('bidBtn');
 const handArea = document.getElementById('handArea');
@@ -40,6 +45,33 @@ const SUIT_MARK = {
 
 let roomState = null;
 let mySeat = null;
+let didAutoJoin = false;
+
+const pendingRoomCode = (new URLSearchParams(window.location.search).get('room') || '').trim().toUpperCase();
+if (pendingRoomCode) {
+  roomCodeInput.value = pendingRoomCode;
+}
+
+function inviteUrl(roomCode) {
+  const url = new URL(window.location.origin);
+  url.searchParams.set('room', roomCode);
+  return url.toString();
+}
+
+function syncRoomUrl(roomCode) {
+  if (!roomCode) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', roomCode);
+  window.history.replaceState({}, '', url);
+}
+
+function maybeAutoJoin() {
+  if (didAutoJoin || roomState) return;
+  if (!pendingRoomCode) return;
+  didAutoJoin = true;
+  const name = playerNameInput.value.trim() || 'Player';
+  socket.emit('joinRoom', { code: pendingRoomCode, name });
+}
 
 function applyTableTheme(theme = tableStyleSelect.value) {
   document.body.dataset.tableTheme = theme;
@@ -241,6 +273,7 @@ function render() {
   if (!roomState) return;
 
   roomCodeLabel.textContent = roomState.roomCode || '';
+  syncRoomUrl(roomState.roomCode);
   stakeLabel.textContent = roomState.stake || '250';
   if (potValueEl) {
     potValueEl.textContent = `$${roomState.stake || 250}`;
@@ -299,6 +332,7 @@ applyTableTheme();
 socket.on('connect', () => {
   markConnected();
   setError('');
+  maybeAutoJoin();
 });
 
 socket.on('roomState', (payload) => {
@@ -349,3 +383,21 @@ bidBtn.addEventListener('click', () => {
 roomCodeInput.addEventListener('input', () => {
   roomCodeInput.value = roomCodeInput.value.toUpperCase();
 });
+
+if (copyInviteBtn) {
+  copyInviteBtn.addEventListener('click', async () => {
+    if (!roomState || !roomState.roomCode) return;
+    const url = inviteUrl(roomState.roomCode);
+    try {
+      await navigator.clipboard.writeText(url);
+      copyInviteBtn.textContent = 'Copied! Send this to your table';
+    } catch (error) {
+      window.prompt('Copy this invite link', url);
+      copyInviteBtn.textContent = 'Copy invite link';
+      return;
+    }
+    window.setTimeout(() => {
+      copyInviteBtn.textContent = 'Copy invite link';
+    }, 1800);
+  });
+}

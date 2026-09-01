@@ -6,7 +6,18 @@ const { Server } = require('socket.io');
 const PORT = process.env.PORT || 3000;
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+app.set('trust proxy', 1);
+
+const io = new Server(server, {
+  cors: {
+    origin: true,
+    methods: ['GET', 'POST'],
+  },
+  transports: ['websocket', 'polling'],
+  pingInterval: 25000,
+  pingTimeout: 60000,
+});
 
 const STAKES = [250, 500, 1000];
 const SUITS = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
@@ -657,6 +668,6 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/public/index.html'));
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Spades server running on http://localhost:${PORT}`);
 });
