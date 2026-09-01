@@ -323,6 +323,10 @@ function renderHand() {
     button.addEventListener('click', () => {
       if (!roomState || !roomState.game) return;
       if (roomState.game.phase !== 'playing' || roomState.game.resolving) return;
+      if (window.SpadesAudio) {
+        SpadesAudio.unlock();
+        SpadesAudio.card();
+      }
       socket.emit('playCard', { roomCode: roomState.roomCode, cardCode: card.code });
     });
     handArea.appendChild(button);
@@ -464,6 +468,10 @@ joinRoomBtn.addEventListener('click', () => {
 
 startGameBtn.addEventListener('click', () => {
   if (!roomState || !roomState.roomCode) return;
+  if (window.SpadesAudio) {
+    SpadesAudio.unlock();
+    SpadesAudio.deal();
+  }
   if (roomState.game && roomState.game.phase === 'finished') {
     socket.emit('nextHand', { roomCode: roomState.roomCode });
     return;
@@ -473,6 +481,10 @@ startGameBtn.addEventListener('click', () => {
 
 bidBtn.addEventListener('click', () => {
   if (!roomState || !roomState.roomCode) return;
+  if (window.SpadesAudio) {
+    SpadesAudio.unlock();
+    SpadesAudio.chip();
+  }
   const bidValue = Number(bidSelect.value);
   socket.emit('submitBid', { roomCode: roomState.roomCode, bid: bidValue });
 });
@@ -484,7 +496,7 @@ roomCodeInput.addEventListener('input', () => {
 function syncSoundToggle() {
   if (!soundToggle || !window.SpadesAudio) return;
   const on = !SpadesAudio.isMuted();
-  soundToggle.textContent = on ? 'Sound on' : 'Sound off';
+  soundToggle.textContent = on ? 'Test sound' : 'Sound off';
   soundToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
 }
 
@@ -492,7 +504,12 @@ if (soundToggle) {
   syncSoundToggle();
   soundToggle.addEventListener('click', () => {
     SpadesAudio.unlock();
-    SpadesAudio.setMuted(!SpadesAudio.isMuted());
+    if (SpadesAudio.isMuted()) SpadesAudio.setMuted(false);
+    else SpadesAudio.ping();
+    syncSoundToggle();
+  });
+  soundToggle.addEventListener('dblclick', () => {
+    SpadesAudio.setMuted(true);
     syncSoundToggle();
   });
 }
