@@ -19,12 +19,24 @@ const handArea = document.getElementById('handArea');
 const tableSeats = document.getElementById('tableSeats');
 const gameMessage = document.getElementById('gameMessage');
 const turnLabel = document.getElementById('turnLabel');
-const trickArea = document.getElementById('trickArea');
 const teamOneScoreEl = document.getElementById('teamOneScore');
 const teamTwoScoreEl = document.getElementById('teamTwoScore');
 const handMeterValueEl = document.getElementById('handMeterValue');
 const handMeterFillEl = document.getElementById('handMeterFill');
 const potValueEl = document.getElementById('potValue');
+const trickSlots = {
+  north: document.getElementById('trickNorth'),
+  east: document.getElementById('trickEast'),
+  south: document.getElementById('trickSouth'),
+  west: document.getElementById('trickWest'),
+};
+
+const SUIT_MARK = {
+  Spades: '♠',
+  Hearts: '♥',
+  Clubs: '♣',
+  Diamonds: '♦',
+};
 
 let roomState = null;
 let mySeat = null;
@@ -51,9 +63,9 @@ function showTable() {
 
 function markConnected() {
   statusBadge.textContent = 'Connected';
-  statusBadge.style.color = '#4de0a4';
-  statusBadge.style.borderColor = 'rgba(77, 224, 164, 0.35)';
-  statusBadge.style.background = 'rgba(77, 224, 164, 0.12)';
+  statusBadge.style.color = '#7dcca6';
+  statusBadge.style.borderColor = 'rgba(125, 204, 166, 0.35)';
+  statusBadge.style.background = 'rgba(125, 204, 166, 0.12)';
 }
 
 function sortHand(cards) {
@@ -67,23 +79,50 @@ function sortHand(cards) {
   });
 }
 
+function relativeSeat(seatIndex) {
+  const origin = mySeat == null ? 0 : mySeat;
+  return (seatIndex - origin + 4) % 4;
+}
+
+function seatLayout(seatIndex) {
+  const rel = relativeSeat(seatIndex);
+  const map = {
+    0: { left: 50, top: 88, slot: 'south' },
+    1: { left: 9, top: 50, slot: 'west' },
+    2: { left: 50, top: 12, slot: 'north' },
+    3: { left: 91, top: 50, slot: 'east' },
+  };
+  return map[rel];
+}
+
+function isRedSuit(suit) {
+  return suit === 'Hearts' || suit === 'Diamonds';
+}
+
+function cardMarkup(card) {
+  const mark = SUIT_MARK[card.suit] || card.suit[0];
+  return `
+    <span class="card-index">${card.rank}${mark}</span>
+    <span class="card-pip">${mark}</span>
+    <span class="card-index bottom">${card.rank}${mark}</span>
+  `;
+}
+
 function renderSeats() {
   if (!roomState) return;
 
   tableSeats.innerHTML = '';
-  const positions = [
-    { left: 50, top: 12 },
-    { left: 82, top: 38 },
-    { left: 50, top: 88 },
-    { left: 18, top: 38 },
-  ];
 
   roomState.players.forEach((player, seatIndex) => {
     const seatCard = document.createElement('div');
     seatCard.className = 'seat-card';
-    const pos = positions[seatIndex] || positions[0];
+    const pos = seatLayout(seatIndex);
     seatCard.style.left = `${pos.left}%`;
     seatCard.style.top = `${pos.top}%`;
+
+    if (roomState.game && roomState.game.dealerSeat === seatIndex) {
+      seatCard.classList.add('dealer');
+    }
 
     if (!player) {
       seatCard.classList.add('empty');
@@ -99,19 +138,27 @@ function renderSeats() {
       return;
     }
 
-    if (roomState.game && roomState.game.currentSeat === player.seat) {
+    if (roomState.game && roomState.game.currentSeat === player.seat && !roomState.game.resolving) {
       seatCard.classList.add('current-turn');
     }
 
-    const badge = player.isBot ? 'Bot' : player.isYou ? 'You' : 'Player';
+    const partnerSeat = mySeat == null ? null : (mySeat + 2) % 4;
+    const badge = player.isYou
+      ? 'You'
+      : partnerSeat === player.seat
+        ? 'Partner'
+        : player.isBot
+          ? 'Bot'
+          : 'Player';
+    const tricks = player.tricks ?? 0;
+
     seatCard.innerHTML = `
       <div class="seat-topline">
         <span class="seat-tag">Seat ${player.seat + 1}</span>
         <span class="seat-badge">${badge}</span>
       </div>
       <h4>${player.name}</h4>
-      <p>Bid: <strong>${player.bid ?? '—'}</strong></p>
-      <p>Team ${player.team + 1}</p>
+      <p>Bid <strong>${player.bid ?? '—'}</strong> · Tricks <strong>${tricks}</strong></p>
     `;
     tableSeats.appendChild(seatCard);
   });
@@ -131,19 +178,24 @@ function renderHand() {
 
   handArea.innerHTML = '';
   const cards = sortHand(myPlayer.hand || []);
-  const isMyTurn = roomState.game && roomState.game.currentSeat === mySeat;
+  const isMyTurn = roomState.game
+    && roomState.game.currentSeat === mySeat
+    && roomState.game.phase === 'playing'
+    && !roomState.game.resolving;
 
   cards.forEach((card, index) => {
     const button = document.createElement('button');
-    button.className = `card-btn ${card.suit === 'Hearts' || card.suit === 'Diamonds' ? 'red' : ''}`;
-    button.disabled = !isMyTurn || !roomState.game || roomState.game.phase !== 'playing';
-    button.textContent = `${card.rank} ${card.suit}`;
-    button.title = `${card.suit} ${card.rank}`;
-    const tilt = (index - (cards.length - 1) / 2) * 4;
+    button.type = 'button';
+    button.className = `card-btn ${isRedSuit(card.suit) ? 'red' : ''}`;
+    button.disabled = !isMyTurn;
+    button.innerHTML = cardMarkup(card);
+    button.title = `${card.rank} of ${card.suit}`;
+    button.style.zIndex = String(index + 1);
+    const tilt = (index - (cards.length - 1) / 2) * 3.4;
     button.style.setProperty('--card-rotate', `${tilt}deg`);
     button.addEventListener('click', () => {
       if (!roomState || !roomState.game) return;
-      if (roomState.game.phase !== 'playing') return;
+      if (roomState.game.phase !== 'playing' || roomState.game.resolving) return;
       socket.emit('playCard', { roomCode: roomState.roomCode, cardCode: card.code });
     });
     handArea.appendChild(button);
@@ -151,17 +203,22 @@ function renderHand() {
 }
 
 function renderTrick() {
+  Object.values(trickSlots).forEach((slot) => {
+    if (slot) slot.innerHTML = '';
+  });
+
   if (!roomState || !roomState.game || !roomState.game.trick || roomState.game.trick.length === 0) {
-    trickArea.innerHTML = '<div class="trick-card">No cards in play yet</div>';
     return;
   }
 
-  trickArea.innerHTML = '';
   roomState.game.trick.forEach((entry) => {
+    const slotName = seatLayout(entry.seat).slot;
+    const slot = trickSlots[slotName];
+    if (!slot) return;
     const cardDiv = document.createElement('div');
-    cardDiv.className = 'trick-card card-pop';
-    cardDiv.textContent = `${entry.card.rank}${entry.card.suit[0]}`;
-    trickArea.appendChild(cardDiv);
+    cardDiv.className = `trick-card mini-card ${isRedSuit(entry.card.suit) ? 'red' : ''}`;
+    cardDiv.innerHTML = cardMarkup(entry.card);
+    slot.appendChild(cardDiv);
   });
 }
 
@@ -170,15 +227,14 @@ function renderScores() {
 
   const teamOneScore = roomState.game.scores[0] ?? 0;
   const teamTwoScore = roomState.game.scores[1] ?? 0;
-  const cardsLeft = roomState.players.reduce((sum, player) => sum + ((player && player.hand) ? player.hand.length : 0), 0);
+  const tricksWon = roomState.game.tricksWon || { 0: 0, 1: 0 };
+  const tricksPlayed = (tricksWon[0] || 0) + (tricksWon[1] || 0);
+  const tricksLeft = roomState.game.phase === 'finished' ? 0 : Math.max(0, 13 - tricksPlayed);
 
   teamOneScoreEl.textContent = String(teamOneScore);
   teamTwoScoreEl.textContent = String(teamTwoScore);
-  handMeterValueEl.textContent = String(cardsLeft || 13);
-  handMeterFillEl.style.width = `${Math.max(10, (cardsLeft / 52) * 100)}%`;
-
-  const scoreText = `Team 1: ${teamOneScore} | Team 2: ${teamTwoScore}`;
-  gameMessage.textContent = `${roomState.game.message} ${scoreText}`;
+  handMeterValueEl.textContent = String(tricksLeft);
+  handMeterFillEl.style.width = `${Math.max(8, (tricksLeft / 13) * 100)}%`;
 }
 
 function render() {
@@ -191,9 +247,22 @@ function render() {
   }
 
   const playerCount = roomState.players.filter(Boolean).length;
-  const canStart = playerCount > 0 && !roomState.game;
-  startGameBtn.disabled = !canStart;
-  startGameBtn.textContent = canStart ? 'Start game' : 'Waiting for players';
+  const finished = roomState.game && roomState.game.phase === 'finished';
+  const canStart = roomState.isHost && playerCount > 0 && !roomState.game;
+  const canDealNext = roomState.isHost && finished;
+
+  startGameBtn.disabled = !(canStart || canDealNext);
+  if (canDealNext) {
+    startGameBtn.textContent = 'Deal next hand';
+  } else if (canStart) {
+    startGameBtn.textContent = 'Start game';
+  } else if (roomState.game) {
+    startGameBtn.textContent = 'Hand in play';
+  } else if (!roomState.isHost) {
+    startGameBtn.textContent = 'Waiting for host';
+  } else {
+    startGameBtn.textContent = 'Waiting for players';
+  }
 
   const currentSeatInfo = roomState.game && roomState.players[roomState.game.currentSeat]
     ? roomState.players[roomState.game.currentSeat].name
@@ -204,8 +273,16 @@ function render() {
     gameMessage.textContent = roomState.game.message;
     renderScores();
   } else {
-    gameMessage.textContent = playerCount >= 4 ? 'Ready to start.' : 'Waiting for players.';
+    gameMessage.textContent = playerCount >= 4 ? 'Ready to start.' : 'Waiting for players. Bots fill empty seats when you start.';
+    teamOneScoreEl.textContent = '0';
+    teamTwoScoreEl.textContent = '0';
+    handMeterValueEl.textContent = '13';
+    handMeterFillEl.style.width = '100%';
   }
+
+  const bidding = roomState.game && roomState.game.phase === 'bidding' && roomState.game.currentSeat === mySeat;
+  bidBtn.disabled = !bidding;
+  bidSelect.disabled = !bidding;
 
   showTable();
   renderSeats();
@@ -256,6 +333,10 @@ joinRoomBtn.addEventListener('click', () => {
 
 startGameBtn.addEventListener('click', () => {
   if (!roomState || !roomState.roomCode) return;
+  if (roomState.game && roomState.game.phase === 'finished') {
+    socket.emit('nextHand', { roomCode: roomState.roomCode });
+    return;
+  }
   socket.emit('startGame', { roomCode: roomState.roomCode });
 });
 

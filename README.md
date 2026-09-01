@@ -9,12 +9,16 @@ A real-time 4-player Spades room starter built for online play from different lo
 - 4 seats per table
 - Stake selection for 250 / 500 / 1000 tables
 - Basic Spades flow: deal, bid, play cards, scoring
+- Oval casino table with your seat on the south rail
+- Trick cards play into the center of the felt
+- 13-card fan along the bottom rail
+- Bots play one card at a time so the trick stays visible
+- Deal the next hand without wiping the score
 - Socket-based multiplayer using Node.js + Socket.IO
 
 ## Run locally
 
 ```bash
-cd spades-online
 npm install
 npm start
 ```
@@ -60,5 +64,4 @@ The app is already configured for a Socket.IO multiplayer room and uses the norm
 - spectator mode
 - reconnect logic
 - room persistence
-- animated card table UI
 - custom table stakes and profiles

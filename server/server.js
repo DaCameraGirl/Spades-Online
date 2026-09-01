@@ -13,6 +13,8 @@ const SUITS = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const RANK_VALUES = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13, A: 14 };
 const BOT_NAMES = ['Buster', 'Lena', 'Drew'];
+const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
+const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
 const rooms = new Map();
 
 function makeCode() {
@@ -113,8 +115,20 @@ function addBotPlayer(room, seat, name) {
 function fillBots(room) {
   for (let seat = 0; seat < 4; seat += 1) {
     if (!room.players[seat]) {
-      addBotPlayer(room, seat, BOT_NAMES[seat - 1] || `Bot ${seat + 1}`);
+      addBotPlayer(room, seat, BOT_NAMES[seat % BOT_NAMES.length] || `Bot ${seat + 1}`);
     }
+  }
+}
+
+function clearRoomTimers(room) {
+  if (!room) return;
+  if (room.botTimer) {
+    clearTimeout(room.botTimer);
+    room.botTimer = null;
+  }
+  if (room.trickTimer) {
+    clearTimeout(room.trickTimer);
+    room.trickTimer = null;
   }
 }
 
@@ -148,6 +162,7 @@ function finishHand(room) {
   room.game.totalScores[1] = (room.game.totalScores[1] || 0) + team1Score;
 
   room.game.phase = 'finished';
+  room.game.resolving = false;
   room.game.message = `Hand complete — Team 1: ${room.game.totalScores[0]} | Team 2: ${room.game.totalScores[1]}`;
   room.game.currentSeat = room.game.dealerSeat;
 }
@@ -177,104 +192,149 @@ function pickBotCard(hand, leadSuit, spadesBroken) {
   return [...hand].sort((a, b) => RANK_VALUES[a.rank] - RANK_VALUES[b.rank])[0];
 }
 
-function handleBotTurn(room) {
-  if (!room || !room.game) return false;
-
-  while (room && room.game && room.players[room.game.currentSeat] && isBotPlayer(room.players[room.game.currentSeat])) {
-    const current = room.players[room.game.currentSeat];
-
-    if (room.game.phase === 'bidding') {
-      const bid = pickBotBid(current.hand);
-      current.bid = bid;
-      room.game.bids[current.seat] = bid;
-
-      const remaining = room.players.filter(Boolean).filter((player) => player.bid === null);
-      if (remaining.length === 0) {
-        room.game.phase = 'playing';
-        room.game.currentSeat = 0;
-        room.game.leadSuit = null;
-        room.game.trick = [];
-        room.game.spadesBroken = false;
-        room.game.message = 'Bidding complete. Lead with your first card.';
-      } else {
-        room.game.currentSeat = nextSeat(current.seat);
-        room.game.message = `Waiting for bids. ${remaining.length} seat(s) left.`;
-      }
-
-      broadcastRoom(room);
-      continue;
-    }
-
-    if (room.game.phase === 'playing') {
-      const card = pickBotCard(current.hand, room.game.leadSuit, room.game.spadesBroken);
-      const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
-      if (cardIndex === -1) return false;
-      current.hand.splice(cardIndex, 1);
-
-      room.game.trick.push({ seat: current.seat, card });
-      if (!room.game.leadSuit) room.game.leadSuit = card.suit;
-      if (card.suit === 'Spades') room.game.spadesBroken = true;
-
-      if (room.game.trick.length < 4) {
-        room.game.currentSeat = nextSeat(current.seat);
-        room.game.message = `Seat ${room.game.currentSeat + 1} is up next.`;
-        broadcastRoom(room);
-        continue;
-      }
-
-      const winningSeat = determineWinner(room.game.trick, room.game.leadSuit);
-      const winningTeam = teamForSeat(winningSeat);
-      room.game.tricksWon[winningTeam] = (room.game.tricksWon[winningTeam] || 0) + 1;
-      room.game.currentSeat = winningSeat;
-      room.game.message = `Seat ${winningSeat + 1} wins the trick.`;
-      room.game.trick = [];
-      room.game.leadSuit = null;
-
-      const cardsLeft = room.players.reduce((sum, seatedPlayer) => sum + (seatedPlayer ? seatedPlayer.hand.length : 0), 0);
-      if (cardsLeft === 0) {
-        finishHand(room);
-        broadcastRoom(room);
-        return true;
-      }
-
-      broadcastRoom(room);
-      continue;
-    }
-
-    break;
+function continueTurn(room) {
+  if (!room || !room.game || room.game.resolving) return;
+  if (isBotPlayer(room.players[room.game.currentSeat])) {
+    queueBotTurn(room);
   }
-
-  return true;
 }
 
-function startGame(room) {
+function queueBotTurn(room) {
+  if (!room || !room.game || room.game.resolving) return;
+  if (room.botTimer) clearTimeout(room.botTimer);
+  room.botTimer = setTimeout(() => {
+    room.botTimer = null;
+    handleBotTurn(room);
+  }, BOT_DELAY_MS);
+}
+
+function resolveCompletedTrick(room) {
+  const winningSeat = determineWinner(room.game.trick, room.game.leadSuit);
+  const winningTeam = teamForSeat(winningSeat);
+  room.game.tricksWon[winningTeam] = (room.game.tricksWon[winningTeam] || 0) + 1;
+  room.game.tricksBySeat[winningSeat] = (room.game.tricksBySeat[winningSeat] || 0) + 1;
+  room.game.currentSeat = winningSeat;
+  room.game.resolving = true;
+  room.game.message = `${room.players[winningSeat].name} wins the trick.`;
+  broadcastRoom(room);
+
+  if (room.trickTimer) clearTimeout(room.trickTimer);
+  room.trickTimer = setTimeout(() => {
+    room.trickTimer = null;
+    if (!room.game) return;
+
+    room.game.trick = [];
+    room.game.leadSuit = null;
+    room.game.resolving = false;
+
+    const cardsLeft = room.players.reduce((sum, seatedPlayer) => sum + (seatedPlayer ? seatedPlayer.hand.length : 0), 0);
+    if (cardsLeft === 0) {
+      finishHand(room);
+      broadcastRoom(room);
+      return;
+    }
+
+    room.game.message = `${room.players[room.game.currentSeat].name} leads the next trick.`;
+    broadcastRoom(room);
+    continueTurn(room);
+  }, TRICK_PAUSE_MS);
+}
+
+function handleBotTurn(room) {
+  if (!room || !room.game || room.game.resolving) return false;
+
+  const current = room.players[room.game.currentSeat];
+  if (!isBotPlayer(current)) return false;
+
+  if (room.game.phase === 'bidding') {
+    const bid = pickBotBid(current.hand);
+    current.bid = bid;
+    room.game.bids[current.seat] = bid;
+
+    const remaining = room.players.filter(Boolean).filter((player) => player.bid === null);
+    if (remaining.length === 0) {
+      room.game.phase = 'playing';
+      room.game.currentSeat = nextSeat(room.game.dealerSeat);
+      room.game.leadSuit = null;
+      room.game.trick = [];
+      room.game.spadesBroken = false;
+      room.game.message = 'Bidding complete. Left of dealer leads.';
+    } else {
+      room.game.currentSeat = nextSeat(current.seat);
+      room.game.message = `${current.name} bids ${bid}. Waiting for ${remaining.length} more.`;
+    }
+
+    broadcastRoom(room);
+    continueTurn(room);
+    return true;
+  }
+
+  if (room.game.phase === 'playing') {
+    const card = pickBotCard(current.hand, room.game.leadSuit, room.game.spadesBroken);
+    const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
+    if (cardIndex === -1) return false;
+    current.hand.splice(cardIndex, 1);
+
+    room.game.trick.push({ seat: current.seat, card });
+    if (!room.game.leadSuit) room.game.leadSuit = card.suit;
+    if (card.suit === 'Spades') room.game.spadesBroken = true;
+
+    if (room.game.trick.length < 4) {
+      room.game.currentSeat = nextSeat(current.seat);
+      room.game.message = `${current.name} plays ${card.rank} of ${card.suit}.`;
+      broadcastRoom(room);
+      continueTurn(room);
+      return true;
+    }
+
+    resolveCompletedTrick(room);
+    return true;
+  }
+
+  return false;
+}
+
+function dealHand(room, { preserveScores = false } = {}) {
   if (!room || room.players.filter(Boolean).length === 0) return;
 
+  clearRoomTimers(room);
   fillBots(room);
+
+  const previousScores = preserveScores && room.game
+    ? { 0: room.game.totalScores[0] || 0, 1: room.game.totalScores[1] || 0 }
+    : { 0: 0, 1: 0 };
+  const previousRound = preserveScores && room.game ? room.game.round || 1 : 0;
+  const dealerSeat = preserveScores && room.game ? nextSeat(room.game.dealerSeat) : 0;
+
   const deck = makeDeck();
   room.players.forEach((player, index) => {
     player.bid = null;
-    player.hand = deck.splice(0, 13);
-    player.hand = sortHand(player.hand);
+    player.hand = sortHand(deck.splice(0, 13));
     player.ready = true;
     player.seat = index;
   });
 
   room.game = {
     phase: 'bidding',
-    round: 1,
-    dealerSeat: 0,
-    currentSeat: 0,
+    round: previousRound + 1,
+    dealerSeat,
+    currentSeat: nextSeat(dealerSeat),
     leadSuit: null,
     trick: [],
     spadesBroken: false,
+    resolving: false,
     bids: { 0: null, 1: null, 2: null, 3: null },
     tricksWon: { 0: 0, 1: 0 },
-    totalScores: { 0: 0, 1: 0 },
+    tricksBySeat: { 0: 0, 1: 0, 2: 0, 3: 0 },
+    totalScores: previousScores,
     message: 'Bidding is open. Choose a bid from 0 to 13.',
   };
 
   room.status = 'playing';
+}
+
+function startGame(room) {
+  dealHand(room, { preserveScores: false });
 }
 
 function validCardPlay(player, card, room) {
@@ -344,6 +404,8 @@ function buildPlayerPayload(room, socketId) {
       bid: player.bid,
       hand: player.socketId === socketId ? sortHand(player.hand || []) : [],
       isYou: player.socketId === socketId,
+      isBot: Boolean(player.isBot),
+      tricks: room.game && room.game.tricksBySeat ? room.game.tricksBySeat[player.seat] || 0 : 0,
       team: teamForSeat(player.seat),
     };
   });
@@ -360,6 +422,7 @@ function buildPlayerPayload(room, socketId) {
         round: room.game.round,
         message: room.game.message,
         tricksWon: room.game.tricksWon || { 0: 0, 1: 0 },
+        resolving: Boolean(room.game.resolving),
       }
     : null;
 
@@ -385,6 +448,7 @@ function broadcastRoom(room) {
 }
 
 function resetRoom(room) {
+  clearRoomTimers(room);
   room.status = 'lobby';
   room.game = null;
   room.players.forEach((player) => {
@@ -452,13 +516,31 @@ io.on('connection', (socket) => {
       socket.emit('errorMessage', 'Add at least one player before starting.');
       return;
     }
-
-    startGame(room);
-    if (isBotPlayer(room.players[room.game.currentSeat])) {
-      handleBotTurn(room);
+    if (room.game && room.game.phase !== 'finished') {
+      socket.emit('errorMessage', 'The hand is already underway.');
       return;
     }
+
+    startGame(room);
     broadcastRoom(room);
+    continueTurn(room);
+  });
+
+  socket.on('nextHand', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    if (room.hostSocketId !== socket.id) {
+      socket.emit('errorMessage', 'Only the host can deal the next hand.');
+      return;
+    }
+    if (!room.game || room.game.phase !== 'finished') {
+      socket.emit('errorMessage', 'Finish the current hand first.');
+      return;
+    }
+
+    dealHand(room, { preserveScores: true });
+    broadcastRoom(room);
+    continueTurn(room);
   });
 
   socket.on('submitBid', ({ roomCode, bid }) => {
@@ -467,6 +549,7 @@ io.on('connection', (socket) => {
 
     const player = getPlayerInRoom(room, socket.id);
     if (!player) return;
+    if (room.game.resolving) return;
     if (room.game.currentSeat !== player.seat) {
       socket.emit('errorMessage', 'It is not your turn to bid.');
       return;
@@ -484,23 +567,19 @@ io.on('connection', (socket) => {
     const remainingPlayers = room.players.filter(Boolean).filter((entry) => entry.bid === null);
     if (remainingPlayers.length === 0) {
       room.game.phase = 'playing';
-      room.game.currentSeat = 0;
+      room.game.currentSeat = nextSeat(room.game.dealerSeat);
       room.game.leadSuit = null;
       room.game.trick = [];
       room.game.spadesBroken = false;
       room.game.tricksWon = { 0: 0, 1: 0 };
-      room.game.message = 'Bidding complete. Lead with your first card.';
+      room.game.message = 'Bidding complete. Left of dealer leads.';
     } else {
       room.game.currentSeat = nextSeat(player.seat);
       room.game.message = `Waiting for bids. ${remainingPlayers.length} seat(s) left.`;
     }
 
-    if (room.game.currentSeat !== null && isBotPlayer(room.players[room.game.currentSeat])) {
-      handleBotTurn(room);
-      return;
-    }
-
     broadcastRoom(room);
+    continueTurn(room);
   });
 
   socket.on('playCard', ({ roomCode, cardCode }) => {
@@ -509,6 +588,10 @@ io.on('connection', (socket) => {
 
     const player = getPlayerInRoom(room, socket.id);
     if (!player) return;
+    if (room.game.resolving) {
+      socket.emit('errorMessage', 'Wait for the trick to finish.');
+      return;
+    }
     if (room.game.currentSeat !== player.seat) {
       socket.emit('errorMessage', 'It is not your turn.');
       return;
@@ -532,36 +615,13 @@ io.on('connection', (socket) => {
 
     if (room.game.trick.length < 4) {
       room.game.currentSeat = nextSeat(player.seat);
-      room.game.message = `Seat ${room.game.currentSeat + 1} is up next.`;
-      if (isBotPlayer(room.players[room.game.currentSeat])) {
-        handleBotTurn(room);
-        return;
-      }
+      room.game.message = `${player.name} plays ${chosenCard.rank} of ${chosenCard.suit}.`;
       broadcastRoom(room);
+      continueTurn(room);
       return;
     }
 
-    const winningSeat = determineWinner(room.game.trick, room.game.leadSuit);
-    const winningTeam = teamForSeat(winningSeat);
-    room.game.tricksWon[winningTeam] = (room.game.tricksWon[winningTeam] || 0) + 1;
-    room.game.currentSeat = winningSeat;
-    room.game.message = `Seat ${winningSeat + 1} wins the trick.`;
-    room.game.trick = [];
-    room.game.leadSuit = null;
-
-    const cardsLeft = room.players.reduce((sum, seatedPlayer) => sum + (seatedPlayer ? seatedPlayer.hand.length : 0), 0);
-    if (cardsLeft === 0) {
-      finishHand(room);
-      broadcastRoom(room);
-      return;
-    }
-
-    if (isBotPlayer(room.players[room.game.currentSeat])) {
-      handleBotTurn(room);
-      return;
-    }
-
-    broadcastRoom(room);
+    resolveCompletedTrick(room);
   });
 
   socket.on('resetRoom', ({ roomCode }) => {
@@ -576,6 +636,7 @@ io.on('connection', (socket) => {
       const index = room.players.findIndex((player) => player && player.socketId === socket.id);
       if (index === -1) continue;
 
+      clearRoomTimers(room);
       room.players[index] = null;
       if (room.hostSocketId === socket.id) {
         const nextHost = room.players.find((player) => player && player.socketId !== socket.id);
