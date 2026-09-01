@@ -228,12 +228,30 @@ function isRedSuit(suit) {
   return suit === 'Hearts' || suit === 'Diamonds';
 }
 
+const PIP_SLOTS = {
+  A: ['c'],
+  '2': ['t', 'bi'],
+  '3': ['t', 'c', 'bi'],
+  '4': ['tl', 'tr', 'bl', 'br'],
+  '5': ['tl', 'tr', 'c', 'bl', 'br'],
+  '6': ['tl', 'tr', 'ml', 'mr', 'bl', 'br'],
+  '7': ['tl', 'tr', 'tc', 'ml', 'mr', 'bl', 'br'],
+  '8': ['tl', 'tr', 'tc', 'ml', 'mr', 'bc', 'bl', 'br'],
+  '9': ['tl', 'tr', 'ul', 'ur', 'c', 'll', 'lr', 'bl', 'br'],
+  '10': ['tl', 'tr', 'tc', 'ul', 'ur', 'll', 'lr', 'bc', 'bl', 'br'],
+};
+
 function cardMarkup(card) {
   const mark = SUIT_MARK[card.suit] || card.suit[0];
+  const isFace = card.rank === 'J' || card.rank === 'Q' || card.rank === 'K';
+  const body = isFace
+    ? `<div class="pc-court"><span class="pc-court-rank">${card.rank}</span><span class="pc-court-suit">${mark}</span></div>`
+    : `<div class="pc-pips">${(PIP_SLOTS[card.rank] || ['c']).map((slot) => `<span class="pip ${slot}">${mark}</span>`).join('')}</div>`;
+
   return `
-    <span class="card-index">${card.rank}${mark}</span>
-    <span class="card-pip">${mark}</span>
-    <span class="card-index bottom">${card.rank}${mark}</span>
+    <span class="pc-index top"><b>${card.rank}</b><i>${mark}</i></span>
+    ${body}
+    <span class="pc-index bot"><b>${card.rank}</b><i>${mark}</i></span>
   `;
 }
 
@@ -320,8 +338,6 @@ function renderHand() {
     button.innerHTML = cardMarkup(card);
     button.title = `${card.rank} of ${card.suit}`;
     button.style.zIndex = String(index + 1);
-    const tilt = (index - (cards.length - 1) / 2) * 3.4;
-    button.style.setProperty('--card-rotate', `${tilt}deg`);
     button.addEventListener('click', () => {
       if (!roomState || !roomState.game) return;
       if (roomState.game.phase !== 'playing' || roomState.game.resolving) return;

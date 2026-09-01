@@ -440,8 +440,8 @@ button:disabled {
 
 .trick-slot {
   position: absolute;
-  width: 68px;
-  height: 96px;
+  width: 72px;
+  height: 102px;
 }
 
 .trick-slot.north { left: 50%; top: 0; transform: translateX(-50%); }
@@ -450,42 +450,109 @@ button:disabled {
 .trick-slot.west { left: 8px; top: 50%; transform: translateY(-50%); }
 
 .trick-card,
-.mini-card {
-  width: 68px;
-  height: 96px;
-  border-radius: 10px;
-  background: linear-gradient(180deg, var(--card-face), #efe6d2);
-  color: var(--ink);
-  border: 1px solid rgba(28, 20, 14, 0.12);
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+.mini-card,
+.card-btn {
+  width: 72px;
+  height: 102px;
+  border-radius: 7px;
+  background: #fff;
+  color: #161616;
+  border: 1px solid #c5c9d1;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28), inset 0 0 0 1px #fff;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: 6px 7px;
-  font-family: "Fraunces", Georgia, serif;
+  padding: 4px 5px 3px;
+  font-family: "Times New Roman", Times, serif;
   font-weight: 700;
-  line-height: 1;
+  line-height: 0.9;
+  position: relative;
+}
+
+.trick-card,
+.mini-card {
   animation: cardPop 0.28s ease;
 }
 
 .trick-card.red,
 .mini-card.red,
 .card-btn.red {
-  color: #b23434;
+  color: #c41e3a;
 }
 
-.card-index {
+.pc-index {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 16px;
+  font-size: 13px;
+  z-index: 1;
+}
+
+.pc-index b {
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.pc-index i {
+  font-style: normal;
+  font-size: 11px;
+}
+
+.pc-index.bot {
+  transform: rotate(180deg);
+  align-self: end;
+  margin-top: auto;
+}
+
+.pc-pips {
+  position: absolute;
+  inset: 16px 8px 16px 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: repeat(7, 1fr);
+  pointer-events: none;
+}
+
+.pip {
+  display: grid;
+  place-items: center;
   font-size: 15px;
 }
 
-.card-pip {
-  text-align: center;
-  font-size: 22px;
+.pip.tl { grid-area: 1 / 1; }
+.pip.t  { grid-area: 1 / 2; }
+.pip.tr { grid-area: 1 / 3; }
+.pip.tc { grid-area: 2 / 2; }
+.pip.ul { grid-area: 3 / 1; }
+.pip.ur { grid-area: 3 / 3; }
+.pip.ml { grid-area: 4 / 1; }
+.pip.c  { grid-area: 4 / 2; font-size: 22px; }
+.pip.mr { grid-area: 4 / 3; }
+.pip.ll { grid-area: 5 / 1; transform: rotate(180deg); }
+.pip.lr { grid-area: 5 / 3; transform: rotate(180deg); }
+.pip.bc { grid-area: 6 / 2; transform: rotate(180deg); }
+.pip.bl { grid-area: 7 / 1; transform: rotate(180deg); }
+.pip.bi { grid-area: 7 / 2; transform: rotate(180deg); }
+.pip.br { grid-area: 7 / 3; transform: rotate(180deg); }
+
+.pc-court {
+  position: absolute;
+  inset: 18px 10px 18px 20px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(245,245,245,0.95));
 }
 
-.card-index.bottom {
-  transform: rotate(180deg);
-  align-self: end;
+.pc-court-rank {
+  font-size: 28px;
+  line-height: 0.8;
+}
+
+.pc-court-suit {
+  font-size: 16px;
 }
 
 .chip-panel {
@@ -647,61 +714,33 @@ button:disabled {
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  min-height: 168px;
-  margin-top: 8px;
-  padding: 18px 24px 28px;
+  min-height: 150px;
+  margin-top: 6px;
+  padding: 28px 36px 18px;
   overflow: visible;
 }
 
 .card-btn {
-  width: 78px;
-  height: 114px;
-  margin-left: -30px;
-  border-radius: 12px;
-  border: 1px solid rgba(28, 20, 14, 0.14);
-  background: linear-gradient(180deg, var(--card-face), #efe6d2);
-  color: var(--ink);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: stretch;
-  font-weight: 700;
-  padding: 8px 8px 10px;
-  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  position: relative;
+  margin-left: -48px;
   z-index: 1;
-  transform: rotate(var(--card-rotate, 0deg));
-  transform-origin: bottom center;
-  line-height: 1;
   flex: 0 0 auto;
+  cursor: pointer;
 }
 
 .card-btn:first-child {
   margin-left: 0;
 }
 
-.card-btn .card-index {
-  font-size: 16px;
-}
-
-.card-btn .card-pip {
-  font-size: 26px;
-}
-
-.card-btn .card-index.bottom {
-  display: none;
-}
-
 .card-btn:hover:not(:disabled),
 .card-btn:focus-visible:not(:disabled) {
-  z-index: 8;
-  border-color: rgba(230, 195, 106, 0.7);
-  transform: translateY(-18px) rotate(var(--card-rotate, 0deg));
+  z-index: 40;
+  transform: translateY(-26px);
+  border-color: #8a6a1a;
+  box-shadow: 0 16px 24px rgba(0, 0, 0, 0.35);
 }
 
 .card-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
+  cursor: default;
 }
 
 @keyframes cardPop {
@@ -732,16 +771,27 @@ button:disabled {
   }
 
   .trick-card,
-  .mini-card {
-    width: 54px;
-    height: 76px;
+  .mini-card,
+  .card-btn {
+    width: 56px;
+    height: 80px;
   }
 
   .card-btn {
-    width: 58px;
-    height: 88px;
-    margin-left: -28px;
-    padding: 6px;
+    margin-left: -36px;
+  }
+
+  .pc-index {
+    width: 12px;
+    font-size: 11px;
+  }
+
+  .pip {
+    font-size: 11px;
+  }
+
+  .pip.c {
+    font-size: 16px;
   }
 
   .auth-row,
