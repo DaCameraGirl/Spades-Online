@@ -76,7 +76,7 @@ function showTableCall(text) {
   window.clearTimeout(callTimer);
   callTimer = window.setTimeout(() => {
     tableCall.classList.add('hidden');
-  }, 2200);
+  }, text.toLowerCase().includes('hand complete') ? 4000 : 2200);
 }
 
 function bidTotal(players) {
@@ -145,8 +145,10 @@ function playTableSounds(nextState) {
   }
 
   if (game.phase === 'finished' && prev.phase !== 'finished') {
+    const one = game.scores ? game.scores[0] : 0;
+    const two = game.scores ? game.scores[1] : 0;
     SpadesAudio.say('Hand complete.');
-    showTableCall('Hand complete');
+    showTableCall(`Hand complete  ${one} – ${two}`);
   }
 
   const becameMyTurn = game.currentSeat === mySeat && prev.currentSeat !== mySeat && !game.resolving;
@@ -386,6 +388,10 @@ function render() {
   startGameBtn.disabled = !(canStart || canDealNext);
   if (canDealNext) {
     startGameBtn.textContent = 'Deal next hand';
+    startGameBtn.disabled = false;
+  } else if (finished) {
+    startGameBtn.textContent = 'Dealing next hand...';
+    startGameBtn.disabled = true;
   } else if (canStart) {
     startGameBtn.textContent = 'Start game';
   } else if (roomState.game) {

@@ -26,6 +26,7 @@ const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 const BOT_NAMES = ['Buster', 'Lena', 'Drew'];
 const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
+const NEXT_HAND_MS = Number(process.env.SPADES_NEXT_HAND_MS || 4000);
 const rooms = new Map();
 
 function makeCode() {
@@ -129,6 +130,10 @@ function clearRoomTimers(room) {
     clearTimeout(room.trickTimer);
     room.trickTimer = null;
   }
+  if (room.nextHandTimer) {
+    clearTimeout(room.nextHandTimer);
+    room.nextHandTimer = null;
+  }
 }
 
 function getRoomByCode(code) {
@@ -162,8 +167,25 @@ function finishHand(room) {
 
   room.game.phase = 'finished';
   room.game.resolving = false;
-  room.game.message = `Hand complete — Team 1: ${room.game.totalScores[0]} | Team 2: ${room.game.totalScores[1]}`;
+  room.game.message = `Hand complete — Team 1: ${room.game.totalScores[0]} | Team 2: ${room.game.totalScores[1]}. Dealing the next hand...`;
   room.game.currentSeat = room.game.dealerSeat;
+  queueNextHand(room);
+}
+
+function queueNextHand(room) {
+  if (!room) return;
+  if (room.nextHandTimer) clearTimeout(room.nextHandTimer);
+  room.nextHandTimer = setTimeout(() => {
+    room.nextHandTimer = null;
+    if (!room.game || room.game.phase !== 'finished') return;
+    dealHand(room, { preserveScores: true });
+    broadcastRoom(room);
+    continueTurn(room);
+  }, NEXT_HAND_MS);
+}
+
+function cardsRemaining(room) {
+  return room.players.reduce((sum, seatedPlayer) => sum + (seatedPlayer && seatedPlayer.hand ? seatedPlayer.hand.length : 0), 0);
 }
 
 function pickBotBid(hand) {
@@ -212,8 +234,7 @@ function resolveCompletedTrick(room) {
     room.game.leadSuit = null;
     room.game.resolving = false;
 
-    const cardsLeft = room.players.reduce((sum, seatedPlayer) => sum + (seatedPlayer ? seatedPlayer.hand.length : 0), 0);
-    if (cardsLeft === 0) {
+    if (cardsRemaining(room) === 0) {
       finishHand(room);
       broadcastRoom(room);
       return;
@@ -255,13 +276,22 @@ function handleBotTurn(room) {
   }
 
   if (room.game.phase === 'playing') {
+    if (!current.hand.length) {
+      if (cardsRemaining(room) === 0) {
+        finishHand(room);
+        broadcastRoom(room);
+        return true;
+      }
+      return false;
+    }
+
     const card = pickBotCard(
       current.hand,
       room.game.leadSuit,
       room.game.spadesBroken,
       room.game.trick,
       room.game.currentSeat
-    );
+    ) || current.hand[0];
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
     current.hand.splice(cardIndex, 1);
