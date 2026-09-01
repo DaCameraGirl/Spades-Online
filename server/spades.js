@@ -31,6 +31,28 @@ function lowest(cards) {
   return [...cards].sort((a, b) => RANK_VALUES[a.rank] - RANK_VALUES[b.rank])[0];
 }
 
+function highest(cards) {
+  return [...cards].sort((a, b) => RANK_VALUES[b.rank] - RANK_VALUES[a.rank])[0];
+}
+
+function pickLead(hand, spadesBroken) {
+  const legal = !spadesBroken && hand.some((card) => card.suit !== 'Spades')
+    ? hand.filter((card) => card.suit !== 'Spades')
+    : hand;
+  if (!legal.length) return lowest(hand);
+
+  const aces = legal.filter((card) => card.rank === 'A');
+  if (aces.length) return aces[0];
+
+  const honors = legal.filter((card) => RANK_VALUES[card.rank] >= 11);
+  if (honors.length) return lowest(honors);
+
+  const tens = legal.filter((card) => RANK_VALUES[card.rank] >= 10);
+  if (tens.length) return lowest(tens);
+
+  return highest(legal);
+}
+
 function cardBeats(candidate, current, leadSuit) {
   if (!candidate || !current) return false;
   if (candidate.suit === 'Spades' && current.suit !== 'Spades') return true;
@@ -58,18 +80,16 @@ function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0) {
 
   const leading = !leadSuit || !trick.length;
   if (leading) {
-    const legal = !spadesBroken && hand.some((card) => card.suit !== 'Spades')
-      ? hand.filter((card) => card.suit !== 'Spades')
-      : hand;
-    return lowest(legal);
+    return pickLead(hand, spadesBroken);
   }
 
   const follow = hand.filter((card) => card.suit === leadSuit);
   const winnerSeat = determineWinner(trick, leadSuit);
   const winnerEntry = trick.find((entry) => entry.seat === winnerSeat);
   const winnerCard = winnerEntry ? winnerEntry.card : null;
-  const partnerWinning = winnerSeat != null && teamForSeat(winnerSeat) === teamForSeat(seat);
-
+  const partnerWinning = winnerSeat != null
+    && winnerSeat !== seat
+    && teamForSeat(winnerSeat) === teamForSeat(seat);
   if (follow.length) {
     if (!partnerWinning && winnerCard) {
       const winners = follow.filter((card) => cardBeats(card, winnerCard, leadSuit));
@@ -79,7 +99,8 @@ function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0) {
   }
 
   const spades = hand.filter((card) => card.suit === 'Spades');
-  if (!partnerWinning && winnerCard && spades.length) {
+  const shouldTrump = !partnerWinning && winnerCard && spades.length;
+  if (shouldTrump) {
     const winningTrumps = winnerCard.suit === 'Spades'
       ? spades.filter((card) => RANK_VALUES[card.rank] > RANK_VALUES[winnerCard.rank])
       : spades;

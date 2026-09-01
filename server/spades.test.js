@@ -44,6 +44,38 @@ test('bot cannot lead spades until they are broken', () => {
   assert.equal(played.suit, 'Hearts');
 });
 
+test('void bot trumps a walking 4 of clubs', () => {
+  const hand = [card('2', 'Spades'), card('9', 'Hearts'), card('6', 'Diamonds')];
+  const trick = [{ seat: 0, card: card('4', 'Clubs') }];
+  const played = pickBotCard(hand, 'Clubs', false, trick, 1);
+  assert.equal(played.suit, 'Spades');
+});
+
+test('bot with a higher club takes a walking 5', () => {
+  const hand = [card('2', 'Clubs'), card('9', 'Clubs'), card('3', 'Hearts')];
+  const trick = [{ seat: 0, card: card('5', 'Clubs') }];
+  const played = pickBotCard(hand, 'Clubs', false, trick, 1);
+  assert.equal(played.rank, '9');
+  assert.equal(played.suit, 'Clubs');
+});
+
+test('last-to-play bot trumps if void and a low club is winning', () => {
+  const hand = [card('4', 'Spades'), card('8', 'Hearts')];
+  const trick = [
+    { seat: 0, card: card('5', 'Clubs') },
+    { seat: 1, card: card('2', 'Clubs') },
+    { seat: 2, card: card('3', 'Clubs') },
+  ];
+  const played = pickBotCard(hand, 'Clubs', false, trick, 3);
+  assert.equal(played.suit, 'Spades');
+});
+
+test('bot does not lead a 4 when it has a higher legal card', () => {
+  const hand = [card('4', 'Clubs'), card('Q', 'Hearts'), card('2', 'Spades')];
+  const played = pickBotCard(hand, null, false, [], 1);
+  assert.equal(played.rank, 'Q');
+});
+
 test('ace of clubs wins unless a spade is played', () => {
   const noTrump = [
     { seat: 0, card: card('A', 'Clubs') },

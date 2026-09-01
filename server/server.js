@@ -260,7 +260,7 @@ function handleBotTurn(room) {
       room.game.leadSuit,
       room.game.spadesBroken,
       room.game.trick,
-      current.seat
+      room.game.currentSeat
     );
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
@@ -423,7 +423,7 @@ function resetRoom(room) {
 app.use(express.static(path.join(__dirname, '../client/public')));
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, rooms: rooms.size });
+  res.json({ ok: true, rooms: rooms.size, version: 'trump-v2' });
 });
 
 io.on('connection', (socket) => {
