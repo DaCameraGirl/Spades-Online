@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: retroarcade-spades-online
+    name: spades-online
     runtime: node
     plan: free
     buildCommand: npm install

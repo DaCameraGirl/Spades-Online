@@ -2,6 +2,8 @@
 
 A real-time 4-player Spades room starter built for online play from different locations.
 
+**Play live:** [https://spades-online.onrender.com](https://spades-online.onrender.com)
+
 ## Features
 
 - Create a room and share the code
@@ -37,18 +39,19 @@ http://localhost:3000
 
 For solo testing, create a room as the host and start the table with one human player. The server fills the remaining seats with bots automatically.
 
-## Repo
-
-https://github.com/DaCameraGirl/Spades-Online
-
 ## Play with people in another state
 
-GitHub hosts the code. Localhost only works on your machine. Friends in another state need the **same live game URL**, then:
+Use the live Render URL, not GitHub and not localhost:
 
-1. One person creates a room.
-2. Hit **Copy invite link** and send that link.
-3. Everyone else opens the link, types their name if needed, and they land at the same table.
-4. When the table is ready, the host starts the game. Empty seats fill with bots.
+**https://spades-online.onrender.com**
+
+1. Open that link.
+2. One person creates a room.
+3. Hit **Copy invite link** and send that link (it will look like `https://spades-online.onrender.com/?room=ABCDE`).
+4. Everyone else opens the invite, types their name if needed, and they land at the same table.
+5. When the table is ready, the host starts the game. Empty seats fill with bots.
+
+The first load after idle can take about a minute while Render wakes the free service.
 
 ## Next upgrade ideas
 
