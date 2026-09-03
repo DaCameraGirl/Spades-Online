@@ -1,6 +1,8 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 
 const PORT = process.env.PORT || 3000;
@@ -19,7 +21,7 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
-const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat } = require('./spades');
+const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit } = require('./spades');
 
 const STAKES = [250, 500, 1000];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -27,7 +29,55 @@ const BOT_NAMES = ['Buster', 'Lena', 'Drew'];
 const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
 const NEXT_HAND_MS = Number(process.env.SPADES_NEXT_HAND_MS || 4000);
+const RECONNECT_GRACE_MS = Number(process.env.SPADES_RECONNECT_GRACE_MS || 30000);
+const DATA_FILE = process.env.SPADES_DATA_FILE || path.join(__dirname, 'rooms.json');
 const rooms = new Map();
+
+function newSessionToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function persistRooms() {
+  const snapshot = [...rooms.values()].map((room) => ({
+    ...room,
+    hostSocketId: null,
+    players: room.players.map((player) => player && {
+      ...player,
+      socketId: null,
+      connected: false,
+    }),
+    botTimer: undefined,
+    trickTimer: undefined,
+    nextHandTimer: undefined,
+    graceTimers: undefined,
+  }));
+  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+  fs.writeFileSync(DATA_FILE, JSON.stringify(snapshot, null, 2));
+}
+
+function loadRooms() {
+  if (!fs.existsSync(DATA_FILE)) return;
+  const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  if (!Array.isArray(saved)) return;
+  saved.forEach((room) => {
+    if (!room || !room.code || !Array.isArray(room.players)) return;
+    room.hostSocketId = null;
+    room.players = Array.from({ length: 4 }, (_, seat) => {
+      const player = room.players[seat];
+      if (!player) return null;
+      return {
+        ...player,
+        seat,
+        socketId: null,
+        connected: false,
+      };
+    });
+    room.graceTimers = new Map();
+    rooms.set(room.id, room);
+  });
+}
+
+loadRooms();
 
 function makeCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -72,21 +122,25 @@ function createRoom() {
     id: `${Date.now()}`,
     code: roomCode,
     stake: STAKES[0],
+    rankMode: 'deuces',
     status: 'lobby',
     hostSocketId: null,
+    hostSessionToken: null,
     players: Array(4).fill(null),
     game: null,
+    graceTimers: new Map(),
   };
   rooms.set(room.id, room);
   return room;
 }
 
-function seatPlayer(room, socketId, name) {
+function seatPlayer(room, socketId, name, sessionToken) {
   const seat = room.players.findIndex((player) => !player);
   if (seat === -1) return false;
 
   room.players[seat] = {
     id: `${seat}-${Date.now()}`,
+    sessionToken,
     socketId,
     name: name || `Player ${seat + 1}`,
     seat,
@@ -106,6 +160,7 @@ function isBotPlayer(player) {
 function addBotPlayer(room, seat, name) {
   room.players[seat] = {
     id: `bot-${seat}-${Date.now()}`,
+    sessionToken: null,
     socketId: `bot-${room.id}-${seat}`,
     name: name || `Bot ${seat + 1}`,
     seat,
@@ -147,6 +202,29 @@ function getRoomByCode(code) {
 
 function getPlayerInRoom(room, socketId) {
   return room.players.find((player) => player && player.socketId === socketId) || null;
+}
+
+function getPlayerBySession(sessionToken) {
+  if (!sessionToken) return null;
+  for (const room of rooms.values()) {
+    const player = room.players.find((entry) => entry && entry.sessionToken === sessionToken);
+    if (player) return { room, player };
+  }
+  return null;
+}
+
+function attachPlayer(room, player, socket) {
+  const graceTimer = room.graceTimers && room.graceTimers.get(player.sessionToken);
+  if (graceTimer) clearTimeout(graceTimer);
+  if (!room.graceTimers) room.graceTimers = new Map();
+  room.graceTimers.delete(player.sessionToken);
+  player.socketId = socket.id;
+  player.connected = true;
+  if (room.hostSessionToken === player.sessionToken) room.hostSocketId = socket.id;
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  persistRooms();
+  broadcastRoom(room);
 }
 
 function scoreTeam(teamBid, tricksWon) {
@@ -221,7 +299,7 @@ function queueBotTurn(room) {
 }
 
 function resolveCompletedTrick(room) {
-  const winningSeat = determineWinner(room.game.trick, room.game.leadSuit);
+  const winningSeat = determineWinner(room.game.trick, room.game.leadSuit, room.rankMode);
   const winningTeam = teamForSeat(winningSeat);
   room.game.tricksWon[winningTeam] = (room.game.tricksWon[winningTeam] || 0) + 1;
   room.game.tricksBySeat[winningSeat] = (room.game.tricksBySeat[winningSeat] || 0) + 1;
@@ -295,7 +373,8 @@ function handleBotTurn(room) {
       room.game.leadSuit,
       room.game.spadesBroken,
       room.game.trick,
-      room.game.currentSeat
+      room.game.currentSeat,
+      room.rankMode
     ) || current.hand[0];
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
@@ -336,7 +415,7 @@ function dealHand(room, { preserveScores = false } = {}) {
   room.players.forEach((player, index) => {
     if (!player) return;
     player.bid = null;
-    player.hand = sortHand(deck.splice(0, 13));
+    player.hand = sortHand(deck.splice(0, 13), room.rankMode);
     player.ready = true;
     player.seat = index;
   });
@@ -369,19 +448,20 @@ function validCardPlay(player, card, room) {
   if (!player || !player.hand || !player.hand.some((entry) => entry.code === card.code)) return false;
 
   const trick = room.game.trick || [];
+  const mode = room.rankMode || 'ace';
   if (!trick.length) {
-    if (card.suit === 'Spades' && !room.game.spadesBroken) {
-      const hasNonSpade = player.hand.some((entry) => entry.suit !== 'Spades');
-      if (hasNonSpade) return false;
+    if (isTrump(card, mode) && !room.game.spadesBroken) {
+      const hasNonTrump = player.hand.some((entry) => !isTrump(entry, mode));
+      if (hasNonTrump) return false;
     }
     return true;
   }
 
   const leadSuit = room.game.leadSuit;
-  const hasLeadSuit = player.hand.some((entry) => entry.suit === leadSuit);
-  if (hasLeadSuit && card.suit !== leadSuit) return false;
+  const hasLeadSuit = player.hand.some((entry) => effectiveSuit(entry, mode) === leadSuit);
+  if (hasLeadSuit && effectiveSuit(card, mode) !== leadSuit) return false;
 
-  if (card.suit === 'Spades' && leadSuit !== 'Spades') {
+  if (isTrump(card, mode) && leadSuit !== 'Spades') {
     room.game.spadesBroken = true;
   }
 
@@ -393,13 +473,12 @@ function buildPlayerPayload(room, socketId) {
     if (!player) return null;
     return {
       id: player.id,
-      socketId: player.socketId,
       name: player.name,
       seat: player.seat,
       connected: player.connected,
       ready: player.ready,
       bid: player.bid,
-      hand: player.socketId === socketId ? sortHand(player.hand || []) : [],
+      hand: player.socketId === socketId ? sortHand(player.hand || [], room.rankMode) : [],
       isYou: player.socketId === socketId,
       isBot: Boolean(player.isBot),
       tricks: room.game && room.game.tricksBySeat ? room.game.tricksBySeat[player.seat] || 0 : 0,
@@ -428,6 +507,7 @@ function buildPlayerPayload(room, socketId) {
     roomCode: room.code,
     roomId: room.id,
     stake: room.stake,
+    rankMode: room.rankMode || 'ace',
     players,
     game,
     isHost: room.hostSocketId === socketId,
@@ -436,6 +516,7 @@ function buildPlayerPayload(room, socketId) {
 }
 
 function broadcastRoom(room) {
+  persistRooms();
   room.players.forEach((player) => {
     if (!player || !player.socketId) return;
     const socket = io.sockets.sockets.get(player.socketId);
@@ -464,11 +545,26 @@ app.get('/health', (req, res) => {
 });
 
 io.on('connection', (socket) => {
-  socket.on('createRoom', ({ name, stake }) => {
+  const sessionToken = String(socket.handshake.auth && socket.handshake.auth.sessionToken || newSessionToken());
+  socket.data.sessionToken = sessionToken;
+  const restored = getPlayerBySession(sessionToken);
+  if (restored && !restored.player.connected) {
+    attachPlayer(restored.room, restored.player, socket);
+  } else if (restored && restored.player.connected) {
+    socket.emit('errorMessage', 'That session is already connected.');
+  }
+
+  socket.on('createRoom', ({ name, stake, rankMode }) => {
+    if (getPlayerBySession(sessionToken)) {
+      socket.emit('errorMessage', 'This session is already seated at a table.');
+      return;
+    }
     const room = createRoom();
     room.stake = STAKES.includes(Number(stake)) ? Number(stake) : STAKES[0];
+    room.rankMode = rankMode === 'ace' ? 'ace' : 'deuces';
+    room.hostSessionToken = sessionToken;
     room.hostSocketId = socket.id;
-    seatPlayer(room, socket.id, name || 'Host');
+    seatPlayer(room, socket.id, name || 'Host', sessionToken);
     socket.join(room.code);
     socket.data.roomCode = room.code;
     broadcastRoom(room);
@@ -481,18 +577,27 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const sessionPlayer = room.players.find((player) => player && player.sessionToken === sessionToken);
+    if (sessionPlayer) {
+      if (sessionPlayer.connected && sessionPlayer.socketId !== socket.id) {
+        socket.emit('errorMessage', 'That session is already connected.');
+        return;
+      }
+      attachPlayer(room, sessionPlayer, socket);
+      return;
+    }
+
+    if (getPlayerBySession(sessionToken)) {
+      socket.emit('errorMessage', 'This session is already seated at another table.');
+      return;
+    }
+
     if (room.players.every(Boolean)) {
       socket.emit('errorMessage', 'That table is full.');
       return;
     }
 
-    const existing = room.players.find((player) => player && player.socketId === socket.id);
-    if (existing) {
-      socket.emit('errorMessage', 'You are already in this room.');
-      return;
-    }
-
-    const seated = seatPlayer(room, socket.id, name || 'Player');
+    const seated = seatPlayer(room, socket.id, name || 'Player', sessionToken);
     if (!seated) {
       socket.emit('errorMessage', 'Room is full.');
       return;
@@ -644,18 +749,27 @@ io.on('connection', (socket) => {
       const index = room.players.findIndex((player) => player && player.socketId === socket.id);
       if (index === -1) continue;
 
-      clearRoomTimers(room);
-      room.players[index] = null;
-      if (room.hostSocketId === socket.id) {
-        const nextHost = room.players.find((player) => player && player.socketId !== socket.id);
-        room.hostSocketId = nextHost ? nextHost.socketId : null;
-      }
-
-      if (room.players.every((player) => !player)) {
-        rooms.delete(room.id);
-      } else {
-        broadcastRoom(room);
-      }
+      const player = room.players[index];
+      player.connected = false;
+      player.socketId = null;
+      if (room.hostSocketId === socket.id) room.hostSocketId = null;
+      if (!room.graceTimers) room.graceTimers = new Map();
+      const timer = setTimeout(() => {
+        room.graceTimers.delete(player.sessionToken);
+        const stillSeated = room.players[index];
+        if (!stillSeated || stillSeated.connected) return;
+        room.players[index] = null;
+        if (room.hostSessionToken === player.sessionToken) {
+          const successor = room.players.find((entry) => entry && entry.connected);
+          room.hostSessionToken = successor ? successor.sessionToken : null;
+          room.hostSocketId = successor ? successor.socketId : null;
+        }
+        if (room.players.every((entry) => !entry)) rooms.delete(room.id);
+        persistRooms();
+        if (!room.players.every((entry) => !entry)) broadcastRoom(room);
+      }, RECONNECT_GRACE_MS);
+      room.graceTimers.set(player.sessionToken, timer);
+      broadcastRoom(room);
       break;
     }
   });
