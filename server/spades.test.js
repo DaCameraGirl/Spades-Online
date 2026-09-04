@@ -76,6 +76,35 @@ test('bot does not lead a 4 when it has a higher legal card', () => {
   assert.equal(played.rank, 'Q');
 });
 
+test('in 2s high, 2 of spades beats ace of spades', () => {
+  const trick = [
+    { seat: 0, card: card('A', 'Spades') },
+    { seat: 1, card: card('2', 'Spades') },
+  ];
+  assert.equal(determineWinner(trick, 'Spades', 'deuces'), 1);
+  assert.equal(determineWinner(trick, 'Spades', 'ace'), 0);
+});
+
+test('in 2s high, 2 of diamonds is the second trump', () => {
+  const twoDBeatsAce = [
+    { seat: 0, card: card('A', 'Spades') },
+    { seat: 1, card: card('2', 'Diamonds') },
+  ];
+  assert.equal(determineWinner(twoDBeatsAce, 'Spades', 'deuces'), 1);
+
+  const twoSBeatsTwoD = [
+    { seat: 0, card: card('2', 'Diamonds') },
+    { seat: 1, card: card('2', 'Spades') },
+  ];
+  assert.equal(determineWinner(twoSBeatsTwoD, 'Spades', 'deuces'), 1);
+});
+
+test('in 2s high, 2 of diamonds does not count as a diamond', () => {
+  const { effectiveSuit } = require('./spades');
+  assert.equal(effectiveSuit(card('2', 'Diamonds'), 'deuces'), 'Spades');
+  assert.equal(effectiveSuit(card('2', 'Diamonds'), 'ace'), 'Diamonds');
+});
+
 test('ace of clubs wins unless a spade is played', () => {
   const noTrump = [
     { seat: 0, card: card('A', 'Clubs') },

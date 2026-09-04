@@ -1,7 +1,17 @@
+const SESSION_STORAGE_KEY = 'spades.sessionToken';
+let sessionToken = window.localStorage.getItem(SESSION_STORAGE_KEY);
+if (!sessionToken) {
+  sessionToken = window.crypto && window.crypto.randomUUID
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  window.localStorage.setItem(SESSION_STORAGE_KEY, sessionToken);
+}
+
 const socket = io({
   transports: ['websocket', 'polling'],
   reconnection: true,
   reconnectionAttempts: 12,
+  auth: { sessionToken },
 });
 
 const lobbySection = document.getElementById('lobby');
@@ -197,6 +207,13 @@ function markConnected() {
   statusBadge.style.background = 'rgba(125, 204, 166, 0.12)';
 }
 
+socket.on('disconnect', () => {
+  statusBadge.textContent = 'Reconnecting…';
+  statusBadge.style.color = '#e9c66d';
+  statusBadge.style.borderColor = 'rgba(233, 198, 109, 0.35)';
+  statusBadge.style.background = 'rgba(233, 198, 109, 0.12)';
+});
+
 function sortHand(cards) {
   const suitOrder = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
   const rankOrder = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13, A: 14 };
@@ -290,13 +307,17 @@ function renderSeats() {
     }
 
     const partnerSeat = mySeat == null ? null : (mySeat + 2) % 4;
-    const badge = player.isYou
-      ? 'You'
-      : partnerSeat === player.seat
-        ? 'Partner'
-        : player.isBot
-          ? 'Bot'
-          : 'Player';
+    const isDisconnected = !player.isBot && player.connected === false;
+    if (isDisconnected) seatCard.classList.add('disconnected');
+    const badge = isDisconnected
+      ? 'Disconnected'
+      : player.isYou
+        ? 'You'
+        : partnerSeat === player.seat
+          ? 'Partner'
+          : player.isBot
+            ? 'Bot'
+            : 'Player';
     const tricks = player.tricks ?? 0;
 
     seatCard.innerHTML = `
@@ -338,6 +359,9 @@ function renderHand() {
     button.innerHTML = cardMarkup(card);
     button.title = `${card.rank} of ${card.suit}`;
     button.style.zIndex = String(index + 1);
+    const fanOffset = index - ((cards.length - 1) / 2);
+    button.style.setProperty('--fan-angle', `${fanOffset * 3}deg`);
+    button.style.setProperty('--fan-lift', `${Math.abs(fanOffset) * 1.2}px`);
     button.addEventListener('click', () => {
       if (!roomState || !roomState.game) return;
       if (roomState.game.phase !== 'playing' || roomState.game.resolving) return;
@@ -481,7 +505,7 @@ createRoomBtn.addEventListener('click', () => {
   if (window.SpadesAudio) SpadesAudio.unlock();
   const name = playerNameInput.value.trim() || 'Host';
   const stake = Number(stakeSelect.value);
-  socket.emit('createRoom', { name, stake });
+  socket.emit('createRoom', { name, stake, sessionToken });
   setError('');
 });
 
@@ -493,7 +517,7 @@ joinRoomBtn.addEventListener('click', () => {
     return;
   }
 
-  socket.emit('joinRoom', { code: roomCode, name });
+  socket.emit('joinRoom', { code: roomCode, name, sessionToken });
   setError('');
 });
 
