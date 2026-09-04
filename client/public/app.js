@@ -307,13 +307,17 @@ function renderSeats() {
     }
 
     const partnerSeat = mySeat == null ? null : (mySeat + 2) % 4;
-    const badge = player.isYou
-      ? 'You'
-      : partnerSeat === player.seat
-        ? 'Partner'
-        : player.isBot
-          ? 'Bot'
-          : 'Player';
+    const isDisconnected = !player.isBot && player.connected === false;
+    if (isDisconnected) seatCard.classList.add('disconnected');
+    const badge = isDisconnected
+      ? 'Disconnected'
+      : player.isYou
+        ? 'You'
+        : partnerSeat === player.seat
+          ? 'Partner'
+          : player.isBot
+            ? 'Bot'
+            : 'Player';
     const tricks = player.tricks ?? 0;
 
     seatCard.innerHTML = `

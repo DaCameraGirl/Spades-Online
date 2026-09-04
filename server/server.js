@@ -30,6 +30,8 @@ const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
 const NEXT_HAND_MS = Number(process.env.SPADES_NEXT_HAND_MS || 4000);
 const RECONNECT_GRACE_MS = Number(process.env.SPADES_RECONNECT_GRACE_MS || 30000);
+const ROOM_TTL_MS = Number(process.env.SPADES_ROOM_TTL_MS || 6 * 60 * 60 * 1000);
+const ROOM_SWEEP_INTERVAL_MS = Number(process.env.SPADES_ROOM_SWEEP_INTERVAL_MS || 5 * 60 * 1000);
 const DATA_FILE = process.env.SPADES_DATA_FILE || path.join(__dirname, 'rooms.json');
 const rooms = new Map();
 
@@ -73,11 +75,31 @@ function loadRooms() {
       };
     });
     room.graceTimers = new Map();
+    room.lastActivityAt = room.lastActivityAt || Date.now();
     rooms.set(room.id, room);
   });
 }
 
+function hasConnectedHuman(room) {
+  return room.players.some((player) => player && player.connected && !player.isBot);
+}
+
+function sweepStaleRooms() {
+  let removedAny = false;
+  for (const room of rooms.values()) {
+    if (hasConnectedHuman(room)) continue;
+    const idleFor = Date.now() - (room.lastActivityAt || 0);
+    if (idleFor > ROOM_TTL_MS) {
+      rooms.delete(room.id);
+      removedAny = true;
+    }
+  }
+  if (removedAny) persistRooms();
+}
+
 loadRooms();
+const sweepTimer = setInterval(sweepStaleRooms, ROOM_SWEEP_INTERVAL_MS);
+sweepTimer.unref();
 
 function makeCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -129,6 +151,7 @@ function createRoom() {
     players: Array(4).fill(null),
     game: null,
     graceTimers: new Map(),
+    lastActivityAt: Date.now(),
   };
   rooms.set(room.id, room);
   return room;
@@ -516,6 +539,7 @@ function buildPlayerPayload(room, socketId) {
 }
 
 function broadcastRoom(room) {
+  room.lastActivityAt = Date.now();
   persistRooms();
   room.players.forEach((player) => {
     if (!player || !player.socketId) return;
@@ -758,15 +782,37 @@ io.on('connection', (socket) => {
         room.graceTimers.delete(player.sessionToken);
         const stillSeated = room.players[index];
         if (!stillSeated || stillSeated.connected) return;
-        room.players[index] = null;
+
+        // A player who never returns would otherwise leave their seat
+        // permanently empty mid-hand, stalling bidding/play forever since
+        // nothing else ever takes their turn. Hand them to a bot so the
+        // hand can finish; an empty lobby seat can just be freed instead.
+        const gameInProgress = room.status === 'playing' && room.game && room.game.phase !== 'finished';
+        if (gameInProgress) {
+          room.players[index] = {
+            ...stillSeated,
+            sessionToken: null,
+            socketId: `bot-${room.id}-${index}`,
+            connected: true,
+            isBot: true,
+          };
+        } else {
+          room.players[index] = null;
+        }
+
         if (room.hostSessionToken === player.sessionToken) {
-          const successor = room.players.find((entry) => entry && entry.connected);
+          const successor = room.players.find((entry) => entry && entry.connected && !entry.isBot);
           room.hostSessionToken = successor ? successor.sessionToken : null;
           room.hostSocketId = successor ? successor.socketId : null;
         }
-        if (room.players.every((entry) => !entry)) rooms.delete(room.id);
+
+        const roomEmpty = room.players.every((entry) => !entry);
+        if (roomEmpty) rooms.delete(room.id);
         persistRooms();
-        if (!room.players.every((entry) => !entry)) broadcastRoom(room);
+        if (!roomEmpty) {
+          broadcastRoom(room);
+          if (gameInProgress) continueTurn(room);
+        }
       }, RECONNECT_GRACE_MS);
       room.graceTimers.set(player.sessionToken, timer);
       broadcastRoom(room);

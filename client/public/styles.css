@@ -629,6 +629,17 @@ button:disabled {
   box-shadow: 0 0 0 1px rgba(230, 195, 106, 0.2), inset 0 0 18px rgba(230, 195, 106, 0.08);
 }
 
+.seat-card.disconnected {
+  opacity: 0.7;
+  border-color: rgba(233, 198, 109, 0.45);
+}
+
+.seat-card.disconnected .seat-badge {
+  background: rgba(233, 198, 109, 0.14);
+  border-color: rgba(233, 198, 109, 0.35);
+  color: #e9c66d;
+}
+
 .seat-card.dealer::after {
   content: "D";
   position: absolute;
