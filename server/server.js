@@ -35,6 +35,146 @@ const ROOM_SWEEP_INTERVAL_MS = Number(process.env.SPADES_ROOM_SWEEP_INTERVAL_MS 
 const DATA_FILE = process.env.SPADES_DATA_FILE || path.join(__dirname, 'rooms.json');
 const rooms = new Map();
 
+const LOBBY_ROOMS = [
+  { id: 'beginner', label: 'Beginner Room', ratingLabel: '1500-1599' },
+  { id: 'advance', label: 'Advance Room', ratingLabel: '1600-1650' },
+  { id: 'expert', label: 'Expert Room', ratingLabel: '1651+' },
+];
+const TABLES_PER_LOBBY = 50;
+const CHAT_HISTORY_LIMIT = 50;
+const lobbyMembers = new Map(LOBBY_ROOMS.map((lobbyRoom) => [lobbyRoom.id, new Map()]));
+const lobbyChat = new Map(LOBBY_ROOMS.map((lobbyRoom) => [lobbyRoom.id, []]));
+
+function lobbyChannel(lobbyRoomId) {
+  return `lobby:${lobbyRoomId}`;
+}
+
+function lobbyTableId(lobbyRoomId, tableNumber) {
+  return `lobby-${lobbyRoomId}-${tableNumber}`;
+}
+
+function getLobbyTable(lobbyRoomId, tableNumber) {
+  return rooms.get(lobbyTableId(lobbyRoomId, Number(tableNumber)));
+}
+
+function seedLobbyTables() {
+  LOBBY_ROOMS.forEach((lobbyRoom) => {
+    for (let tableNumber = 1; tableNumber <= TABLES_PER_LOBBY; tableNumber += 1) {
+      const id = lobbyTableId(lobbyRoom.id, tableNumber);
+      if (rooms.has(id)) continue;
+      rooms.set(id, {
+        id,
+        code: `${lobbyRoom.id[0].toUpperCase()}${String(tableNumber).padStart(2, '0')}`,
+        lobbyRoomId: lobbyRoom.id,
+        tableNumber,
+        isPrivate: false,
+        stake: STAKES[0],
+        rankMode: 'deuces',
+        status: 'lobby',
+        hostSocketId: null,
+        hostSessionToken: null,
+        players: Array(4).fill(null),
+        spectators: [],
+        locked: false,
+        game: null,
+        graceTimers: new Map(),
+        lastActivityAt: Date.now(),
+      });
+    }
+  });
+}
+
+function lobbyTableSummary(lobbyRoomId) {
+  const list = [];
+  for (let tableNumber = 1; tableNumber <= TABLES_PER_LOBBY; tableNumber += 1) {
+    const table = getLobbyTable(lobbyRoomId, tableNumber);
+    list.push({
+      tableNumber,
+      stake: table.stake,
+      seatedCount: table.players.filter(Boolean).length,
+      spectatorCount: (table.spectators || []).length,
+      names: table.players.filter(Boolean).map((player) => player.name),
+      inProgress: Boolean(table.game && table.game.phase !== 'finished'),
+      locked: Boolean(table.locked),
+    });
+  }
+  return list;
+}
+
+function lobbyRosterList(lobbyRoomId) {
+  const members = lobbyMembers.get(lobbyRoomId);
+  return members ? [...members.values()] : [];
+}
+
+function broadcastLobby(lobbyRoomId) {
+  io.to(lobbyChannel(lobbyRoomId)).emit('lobbyState', {
+    lobbyRoomId,
+    tables: lobbyTableSummary(lobbyRoomId),
+    roster: lobbyRosterList(lobbyRoomId),
+  });
+}
+
+function leaveAllLobbies(socket) {
+  const current = socket.data.lobbyRoomId;
+  if (!current) return;
+  socket.leave(lobbyChannel(current));
+  const members = lobbyMembers.get(current);
+  if (members) members.delete(socket.id);
+  socket.data.lobbyRoomId = null;
+  broadcastLobby(current);
+}
+
+function addSpectator(room, socketId, name) {
+  room.spectators = room.spectators || [];
+  room.spectators.push({ socketId, name: name || 'Guest' });
+}
+
+function removeSpectatorBySocket(room, socketId) {
+  if (!room.spectators) return false;
+  const before = room.spectators.length;
+  room.spectators = room.spectators.filter((spectator) => spectator.socketId !== socketId);
+  return room.spectators.length !== before;
+}
+
+// Frees a seat, or hands it to a bot mid-hand so the other seats aren't
+// stalled waiting on a turn that will never come. The 150 lobby tables are
+// permanent fixtures of their room and must never be deleted just because
+// they emptied out, unlike a private code-based table which has no other
+// reason to exist once nobody is left in it.
+function vacateSeat(room, index) {
+  const player = room.players[index];
+  if (!player) return { deleted: false, gameInProgress: false };
+
+  const gameInProgress = room.status === 'playing' && room.game && room.game.phase !== 'finished';
+  if (gameInProgress) {
+    room.players[index] = {
+      ...player,
+      sessionToken: null,
+      socketId: `bot-${room.id}-${index}`,
+      connected: true,
+      isBot: true,
+    };
+  } else {
+    room.players[index] = null;
+  }
+
+  if (room.hostSessionToken === player.sessionToken) {
+    const successor = room.players.find((entry) => entry && entry.connected && !entry.isBot);
+    room.hostSessionToken = successor ? successor.sessionToken : null;
+    room.hostSocketId = successor ? successor.socketId : null;
+  }
+
+  const roomEmpty = room.players.every((entry) => !entry) && !(room.spectators || []).length;
+  if (roomEmpty) {
+    if (!room.lobbyRoomId) {
+      rooms.delete(room.id);
+      return { deleted: true, gameInProgress };
+    }
+    room.locked = false;
+  }
+  return { deleted: false, gameInProgress };
+}
+
 function newSessionToken() {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -48,6 +188,7 @@ function persistRooms() {
       socketId: null,
       connected: false,
     }),
+    spectators: [],
     botTimer: undefined,
     trickTimer: undefined,
     nextHandTimer: undefined,
@@ -74,6 +215,8 @@ function loadRooms() {
         connected: false,
       };
     });
+    room.spectators = [];
+    room.locked = Boolean(room.locked);
     room.graceTimers = new Map();
     room.lastActivityAt = room.lastActivityAt || Date.now();
     rooms.set(room.id, room);
@@ -87,6 +230,7 @@ function hasConnectedHuman(room) {
 function sweepStaleRooms() {
   let removedAny = false;
   for (const room of rooms.values()) {
+    if (room.lobbyRoomId) continue;
     if (hasConnectedHuman(room)) continue;
     const idleFor = Date.now() - (room.lastActivityAt || 0);
     if (idleFor > ROOM_TTL_MS) {
@@ -98,6 +242,7 @@ function sweepStaleRooms() {
 }
 
 loadRooms();
+seedLobbyTables();
 const sweepTimer = setInterval(sweepStaleRooms, ROOM_SWEEP_INTERVAL_MS);
 sweepTimer.unref();
 
@@ -525,6 +670,11 @@ function buildPlayerPayload(room, socketId) {
     game,
     isHost: room.hostSocketId === socketId,
     status: room.status,
+    isPrivate: room.isPrivate !== false,
+    lobbyRoomId: room.lobbyRoomId || null,
+    tableNumber: room.tableNumber || null,
+    isSpectator: Boolean((room.spectators || []).some((spectator) => spectator.socketId === socketId)),
+    locked: Boolean(room.locked),
   };
 }
 
@@ -538,6 +688,13 @@ function broadcastRoom(room) {
       socket.emit('roomState', buildPlayerPayload(room, player.socketId));
     }
   });
+  (room.spectators || []).forEach((spectator) => {
+    const socket = io.sockets.sockets.get(spectator.socketId);
+    if (socket) {
+      socket.emit('roomState', buildPlayerPayload(room, spectator.socketId));
+    }
+  });
+  if (room.lobbyRoomId) broadcastLobby(room.lobbyRoomId);
 }
 
 function resetRoom(room) {
@@ -567,6 +724,123 @@ io.on('connection', (socket) => {
   } else if (restored && restored.player.connected) {
     socket.emit('errorMessage', 'That session is already connected.');
   }
+
+  socket.on('joinLobby', ({ lobbyRoomId, name }) => {
+    const lobbyRoom = LOBBY_ROOMS.find((entry) => entry.id === lobbyRoomId);
+    if (!lobbyRoom) {
+      socket.emit('errorMessage', 'Room not found.');
+      return;
+    }
+    leaveAllLobbies(socket);
+    socket.join(lobbyChannel(lobbyRoomId));
+    socket.data.lobbyRoomId = lobbyRoomId;
+    lobbyMembers.get(lobbyRoomId).set(socket.id, name || 'Guest');
+    socket.emit('lobbyChatHistory', lobbyChat.get(lobbyRoomId));
+    broadcastLobby(lobbyRoomId);
+  });
+
+  socket.on('leaveLobby', () => {
+    leaveAllLobbies(socket);
+  });
+
+  socket.on('sendLobbyChat', ({ lobbyRoomId, text }) => {
+    const lobbyRoom = LOBBY_ROOMS.find((entry) => entry.id === lobbyRoomId);
+    if (!lobbyRoom) return;
+    const trimmed = String(text || '').trim().slice(0, 200);
+    if (!trimmed) return;
+    const name = lobbyMembers.get(lobbyRoomId).get(socket.id) || 'Guest';
+    const message = { name, text: trimmed, at: Date.now() };
+    const log = lobbyChat.get(lobbyRoomId);
+    log.push(message);
+    if (log.length > CHAT_HISTORY_LIMIT) log.shift();
+    io.to(lobbyChannel(lobbyRoomId)).emit('lobbyChatMessage', message);
+  });
+
+  socket.on('joinTable', ({ lobbyRoomId, tableNumber, name }) => {
+    const table = getLobbyTable(lobbyRoomId, tableNumber);
+    if (!table) {
+      socket.emit('errorMessage', 'Table not found.');
+      return;
+    }
+
+    const sessionPlayer = table.players.find((player) => player && player.sessionToken === sessionToken);
+    if (sessionPlayer) {
+      if (sessionPlayer.connected && sessionPlayer.socketId !== socket.id) {
+        socket.emit('errorMessage', 'That session is already connected.');
+        return;
+      }
+      attachPlayer(table, sessionPlayer, socket);
+      return;
+    }
+
+    if (table.locked) {
+      socket.emit('errorMessage', 'This table is locked. Ask for the table code to join.');
+      return;
+    }
+
+    const seatedElsewhere = getPlayerBySession(sessionToken);
+    if (seatedElsewhere && seatedElsewhere.room.id !== table.id) {
+      socket.emit('errorMessage', 'This session is already seated at another table.');
+      return;
+    }
+
+    const wasEmpty = table.players.every((player) => !player) && !(table.spectators || []).length;
+    const seated = seatPlayer(table, socket.id, name || 'Player', sessionToken);
+    socket.join(table.code);
+    socket.data.roomCode = table.code;
+
+    if (seated) {
+      if (wasEmpty) {
+        table.hostSessionToken = sessionToken;
+        table.hostSocketId = socket.id;
+      }
+      if (table.players.filter(Boolean).length === 4 && !table.game) {
+        startGame(table);
+      }
+      broadcastRoom(table);
+      continueTurn(table);
+      return;
+    }
+
+    addSpectator(table, socket.id, name || 'Guest');
+    broadcastRoom(table);
+  });
+
+  socket.on('leaveTable', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+
+    if (removeSpectatorBySocket(room, socket.id)) {
+      socket.leave(room.code);
+      socket.data.roomCode = null;
+      broadcastRoom(room);
+      return;
+    }
+
+    const index = room.players.findIndex((player) => player && player.socketId === socket.id);
+    if (index === -1) return;
+
+    socket.leave(room.code);
+    socket.data.roomCode = null;
+    const result = vacateSeat(room, index);
+    persistRooms();
+    if (!result.deleted) {
+      broadcastRoom(room);
+      if (result.gameInProgress) continueTurn(room);
+    }
+  });
+
+  socket.on('toggleTableLock', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player) {
+      socket.emit('errorMessage', 'Only a seated player can lock this table.');
+      return;
+    }
+    room.locked = !room.locked;
+    broadcastRoom(room);
+  });
 
   socket.on('createRoom', ({ name, stake, rankMode }) => {
     if (getPlayerBySession(sessionToken)) {
@@ -759,6 +1033,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    leaveAllLobbies(socket);
+
+    for (const room of rooms.values()) {
+      if (removeSpectatorBySocket(room, socket.id)) {
+        broadcastRoom(room);
+      }
+    }
+
     for (const room of rooms.values()) {
       const index = room.players.findIndex((player) => player && player.socketId === socket.id);
       if (index === -1) continue;
@@ -773,35 +1055,11 @@ io.on('connection', (socket) => {
         const stillSeated = room.players[index];
         if (!stillSeated || stillSeated.connected) return;
 
-        // A player who never returns would otherwise leave their seat
-        // permanently empty mid-hand, stalling bidding/play forever since
-        // nothing else ever takes their turn. Hand them to a bot so the
-        // hand can finish; an empty lobby seat can just be freed instead.
-        const gameInProgress = room.status === 'playing' && room.game && room.game.phase !== 'finished';
-        if (gameInProgress) {
-          room.players[index] = {
-            ...stillSeated,
-            sessionToken: null,
-            socketId: `bot-${room.id}-${index}`,
-            connected: true,
-            isBot: true,
-          };
-        } else {
-          room.players[index] = null;
-        }
-
-        if (room.hostSessionToken === player.sessionToken) {
-          const successor = room.players.find((entry) => entry && entry.connected && !entry.isBot);
-          room.hostSessionToken = successor ? successor.sessionToken : null;
-          room.hostSocketId = successor ? successor.socketId : null;
-        }
-
-        const roomEmpty = room.players.every((entry) => !entry);
-        if (roomEmpty) rooms.delete(room.id);
+        const result = vacateSeat(room, index);
         persistRooms();
-        if (!roomEmpty) {
+        if (!result.deleted) {
           broadcastRoom(room);
-          if (gameInProgress) continueTurn(room);
+          if (result.gameInProgress) continueTurn(room);
         }
       }, RECONNECT_GRACE_MS);
       room.graceTimers.set(player.sessionToken, timer);

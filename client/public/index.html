@@ -21,14 +21,76 @@
           <h1>Spades Online</h1>
         </div>
         <div class="header-actions">
-          <button id="soundToggle" type="button" class="sound-toggle" data-sound-toggle aria-pressed="true">Sound test</button>
           <div id="statusBadge" class="status-badge">Offline</div>
         </div>
       </header>
 
       <main class="content">
-        <section id="lobby" class="panel active">
-          <h2>Create or join a table</h2>
+        <section id="roomSelect" class="panel active">
+          <h2>Choose a room</h2>
+
+          <div class="auth-row">
+            <label>
+              Your name
+              <input id="lobbyPlayerName" type="text" value="Player 1" maxlength="20" />
+            </label>
+          </div>
+
+          <div class="room-card-grid">
+            <button type="button" class="room-card" data-lobby-room="beginner">
+              <span class="room-card-suit" aria-hidden="true">&spades;</span>
+              <span class="room-card-name">Beginner Room</span>
+              <span class="room-card-divider"></span>
+              <span class="room-card-rating">Rated 1500&ndash;1599</span>
+            </button>
+            <button type="button" class="room-card" data-lobby-room="advance">
+              <span class="room-card-suit" aria-hidden="true">&spades;</span>
+              <span class="room-card-name">Advance Room</span>
+              <span class="room-card-divider"></span>
+              <span class="room-card-rating">Rated 1600&ndash;1650</span>
+            </button>
+            <button type="button" class="room-card" data-lobby-room="expert">
+              <span class="room-card-suit" aria-hidden="true">&spades;</span>
+              <span class="room-card-name">Expert Room</span>
+              <span class="room-card-divider"></span>
+              <span class="room-card-rating">Rated 1651+</span>
+            </button>
+          </div>
+
+          <button id="showPrivateTableBtn" type="button" class="secondary private-table-link">Private table (have a code?)</button>
+
+          <div id="lobbyErrorBox" class="error-box hidden"></div>
+        </section>
+
+        <section id="roomView" class="panel">
+          <div class="room-view-header">
+            <button id="backToRoomsBtn" type="button" class="secondary">&larr; Rooms</button>
+            <h2 id="roomViewTitle">Beginner Room</h2>
+          </div>
+
+          <div id="tableGrid" class="table-grid" aria-label="Tables"></div>
+
+          <div class="room-social">
+            <div class="room-roster">
+              <p class="eyebrow">Players in this room</p>
+              <ul id="rosterList" class="roster-list"></ul>
+            </div>
+            <div class="room-chat">
+              <p class="eyebrow">Room chat</p>
+              <div id="chatLog" class="chat-log"></div>
+              <div class="chat-input-row">
+                <input id="chatInput" type="text" maxlength="200" placeholder="Say something..." />
+                <button id="chatSendBtn" type="button" class="secondary">Send</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="lobby" class="panel">
+          <div class="room-view-header">
+            <button id="backToRoomsFromPrivateBtn" type="button" class="secondary">&larr; Rooms</button>
+            <h2>Create or join a private table</h2>
+          </div>
 
           <div class="auth-row">
             <label>
@@ -73,6 +135,8 @@
                 <p class="eyebrow">Room</p>
                 <h3 id="roomCodeLabel">&mdash;</h3>
                 <button id="copyInviteBtn" type="button" class="invite-btn">Copy invite link</button>
+                <button id="lockTableBtn" type="button" class="invite-btn">Lock table</button>
+                <button id="leaveTableBtn" type="button" class="invite-btn">Leave table</button>
               </div>
 
               <div class="table-scoreboard">

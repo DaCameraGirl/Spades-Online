@@ -14,8 +14,22 @@ const socket = io({
   auth: { sessionToken },
 });
 
+const roomSelectSection = document.getElementById('roomSelect');
+const roomViewSection = document.getElementById('roomView');
 const lobbySection = document.getElementById('lobby');
 const tableSection = document.getElementById('table');
+const lobbyPlayerNameInput = document.getElementById('lobbyPlayerName');
+const roomCards = [...document.querySelectorAll('[data-lobby-room]')];
+const showPrivateTableBtn = document.getElementById('showPrivateTableBtn');
+const backToRoomsBtn = document.getElementById('backToRoomsBtn');
+const backToRoomsFromPrivateBtn = document.getElementById('backToRoomsFromPrivateBtn');
+const roomViewTitle = document.getElementById('roomViewTitle');
+const tableGrid = document.getElementById('tableGrid');
+const rosterList = document.getElementById('rosterList');
+const chatLog = document.getElementById('chatLog');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSendBtn');
+const lobbyErrorBox = document.getElementById('lobbyErrorBox');
 const statusBadge = document.getElementById('statusBadge');
 const roomCodeLabel = document.getElementById('roomCodeLabel');
 const stakeLabel = document.getElementById('stakeLabel');
@@ -28,6 +42,8 @@ const createRoomBtn = document.getElementById('createRoomBtn');
 const joinRoomBtn = document.getElementById('joinRoomBtn');
 const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
+const leaveTableBtn = document.getElementById('leaveTableBtn');
+const lockTableBtn = document.getElementById('lockTableBtn');
 const soundToggles = [...document.querySelectorAll('[data-sound-toggle]')];
 const tableCall = document.getElementById('tableCall');
 const bidSelect = document.getElementById('bidSelect');
@@ -60,6 +76,13 @@ let mySeat = null;
 let didAutoJoin = false;
 let lastAudio = null;
 let callTimer = null;
+let currentLobbyRoomId = null;
+
+const LOBBY_ROOM_LABELS = {
+  beginner: 'Beginner Room',
+  advance: 'Advance Room',
+  expert: 'Expert Room',
+};
 
 const pendingRoomCode = (new URLSearchParams(window.location.search).get('room') || '').trim().toUpperCase();
 if (pendingRoomCode) {
@@ -195,10 +218,38 @@ function setError(message) {
   errorBox.classList.remove('hidden');
 }
 
+function setLobbyError(message) {
+  if (!message) {
+    lobbyErrorBox.classList.add('hidden');
+    lobbyErrorBox.textContent = '';
+    return;
+  }
+
+  lobbyErrorBox.textContent = message;
+  lobbyErrorBox.classList.remove('hidden');
+}
+
+function activatePanel(section) {
+  [roomSelectSection, roomViewSection, lobbySection, tableSection].forEach((panel) => {
+    panel.classList.toggle('active', panel === section);
+  });
+  document.body.classList.toggle('game-active', section === tableSection);
+}
+
+function showRoomSelect() {
+  activatePanel(roomSelectSection);
+}
+
+function showRoomView() {
+  activatePanel(roomViewSection);
+}
+
+function showPrivateTablePanel() {
+  activatePanel(lobbySection);
+}
+
 function showTable() {
-  lobbySection.classList.remove('active');
-  tableSection.classList.add('active');
-  document.body.classList.add('game-active');
+  activatePanel(tableSection);
 }
 
 function markConnected() {
@@ -439,11 +490,93 @@ function renderScores() {
   handMeterFillEl.style.width = `${Math.max(8, (tricksLeft / 13) * 100)}%`;
 }
 
+function joinTable(tableNumber) {
+  if (window.SpadesAudio) SpadesAudio.unlock();
+  const name = lobbyPlayerNameInput.value.trim() || 'Player';
+  socket.emit('joinTable', { lobbyRoomId: currentLobbyRoomId, tableNumber, name });
+}
+
+function tileSeatMarkup(name, position, locked) {
+  if (name) {
+    return `<span class="tile-seat ${position} tile-seat-filled" title="${escapeHtml(name)}">${escapeHtml(playerInitials(name))}</span>`;
+  }
+  if (locked) {
+    return `<span class="tile-seat ${position} tile-seat-locked" title="Table locked">&#128274;</span>`;
+  }
+  return `<button type="button" class="tile-seat ${position} tile-seat-open" title="Join this seat">+</button>`;
+}
+
+function renderTableGrid(tables) {
+  tableGrid.innerHTML = '';
+  tables.forEach((table) => {
+    const tile = document.createElement('div');
+    tile.className = 'table-tile';
+    const isFull = table.seatedCount >= 4;
+    const isLocked = Boolean(table.locked);
+    if (isFull) tile.classList.add('table-full');
+    if (isLocked) tile.classList.add('table-locked');
+
+    const [south, west, north, east] = table.names;
+
+    tile.innerHTML = `
+      <span class="table-tile-number">Table ${table.tableNumber}${isLocked ? ' &#128274;' : ''}</span>
+      <div class="tile-felt">
+        ${tileSeatMarkup(north, 'seat-n', isLocked)}
+        ${tileSeatMarkup(west, 'seat-w', isLocked)}
+        <span class="tile-deck" aria-hidden="true"></span>
+        ${tileSeatMarkup(east, 'seat-e', isLocked)}
+        ${tileSeatMarkup(south, 'seat-s', isLocked)}
+      </div>
+      <span class="table-tile-occupancy">${table.seatedCount}/4${table.spectatorCount ? ` &middot; ${table.spectatorCount} watching` : ''}</span>
+    `;
+
+    if (!isLocked) {
+      tile.querySelectorAll('.tile-seat-open').forEach((seatBtn) => {
+        seatBtn.addEventListener('click', () => joinTable(table.tableNumber));
+      });
+
+      if (isFull) {
+        const felt = tile.querySelector('.tile-felt');
+        felt.classList.add('tile-felt-watchable');
+        felt.title = 'Watch this table';
+        felt.addEventListener('click', () => joinTable(table.tableNumber));
+      }
+    }
+
+    tableGrid.appendChild(tile);
+  });
+}
+
+function renderRoster(roster) {
+  rosterList.innerHTML = '';
+  roster.forEach((name) => {
+    const item = document.createElement('li');
+    item.innerHTML = `<span class="rating-star rating-star-${currentLobbyRoomId}">&#9733;</span> 1500 &middot; ${escapeHtml(name)}`;
+    rosterList.appendChild(item);
+  });
+}
+
+function appendChatMessage(message) {
+  const line = document.createElement('div');
+  line.className = 'chat-line';
+  line.innerHTML = `<strong>${escapeHtml(message.name)}:</strong> ${escapeHtml(message.text)}`;
+  chatLog.appendChild(line);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function sendChatMessage() {
+  const text = chatInput.value.trim();
+  if (!text || !currentLobbyRoomId) return;
+  socket.emit('sendLobbyChat', { lobbyRoomId: currentLobbyRoomId, text });
+  chatInput.value = '';
+}
+
 function render() {
   if (!roomState) return;
 
   roomCodeLabel.textContent = roomState.roomCode || '';
   syncRoomUrl(roomState.roomCode);
+  lockTableBtn.textContent = roomState.locked ? 'Unlock table' : 'Lock table';
   stakeLabel.textContent = roomState.stake || '250';
   if (potValueEl) {
     potValueEl.textContent = `$${roomState.stake || 250}`;
@@ -528,8 +661,63 @@ socket.on('roomState', (payload) => {
   render();
 });
 
+socket.on('lobbyState', (payload) => {
+  if (payload.lobbyRoomId !== currentLobbyRoomId) return;
+  renderTableGrid(payload.tables);
+  renderRoster(payload.roster);
+});
+
+socket.on('lobbyChatHistory', (history) => {
+  chatLog.innerHTML = '';
+  (history || []).forEach(appendChatMessage);
+});
+
+socket.on('lobbyChatMessage', (message) => {
+  appendChatMessage(message);
+});
+
 socket.on('errorMessage', (message) => {
-  setError(message);
+  if (roomViewSection.classList.contains('active') || roomSelectSection.classList.contains('active')) {
+    setLobbyError(message);
+  } else {
+    setError(message);
+  }
+});
+
+roomCards.forEach((card) => {
+  card.addEventListener('click', () => {
+    if (window.SpadesAudio) SpadesAudio.unlock();
+    const lobbyRoomId = card.dataset.lobbyRoom;
+    const name = lobbyPlayerNameInput.value.trim() || 'Player';
+    currentLobbyRoomId = lobbyRoomId;
+    roomViewTitle.textContent = LOBBY_ROOM_LABELS[lobbyRoomId] || 'Room';
+    tableGrid.innerHTML = '';
+    rosterList.innerHTML = '';
+    chatLog.innerHTML = '';
+    setLobbyError('');
+    socket.emit('joinLobby', { lobbyRoomId, name });
+    showRoomView();
+  });
+});
+
+backToRoomsBtn.addEventListener('click', () => {
+  socket.emit('leaveLobby');
+  currentLobbyRoomId = null;
+  showRoomSelect();
+});
+
+backToRoomsFromPrivateBtn.addEventListener('click', () => {
+  showRoomSelect();
+});
+
+showPrivateTableBtn.addEventListener('click', () => {
+  playerNameInput.value = lobbyPlayerNameInput.value;
+  showPrivateTablePanel();
+});
+
+chatSendBtn.addEventListener('click', sendChatMessage);
+chatInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') sendChatMessage();
 });
 
 createRoomBtn.addEventListener('click', () => {
@@ -612,6 +800,24 @@ soundToggles.forEach((toggle) => {
     SpadesAudio.setMuted(true);
     syncSoundToggle();
   });
+});
+
+lockTableBtn.addEventListener('click', () => {
+  if (!roomState || !roomState.roomCode) return;
+  socket.emit('toggleTableLock', { roomCode: roomState.roomCode });
+});
+
+leaveTableBtn.addEventListener('click', () => {
+  if (!roomState || !roomState.roomCode) return;
+  const wasLobbyTable = Boolean(roomState.lobbyRoomId);
+  socket.emit('leaveTable', { roomCode: roomState.roomCode });
+  roomState = null;
+  mySeat = null;
+  if (wasLobbyTable) {
+    showRoomView();
+  } else {
+    showRoomSelect();
+  }
 });
 
 if (copyInviteBtn) {

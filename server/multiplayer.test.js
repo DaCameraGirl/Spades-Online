@@ -122,6 +122,12 @@ function createState(socket) {
   return () => latest;
 }
 
+function createLobbyState(socket) {
+  let latest = null;
+  socket.on('lobbyState', (state) => { latest = state; });
+  return () => latest;
+}
+
 function playableCard(hand, game) {
   if (!hand || !hand.length) return null;
   if (!game.trick.length) {
@@ -417,4 +423,233 @@ test('restarting the server recovers room state and host identity, without expos
   assert.ok(notYetReconnected, 'the other human seats survive the restart as disconnected, not removed');
   assert.equal(notYetReconnected.connected, false);
   assert.equal(notYetReconnected.hand.length, 0, 'a recovered hand is never sent to anyone but its owner');
+});
+
+test('lobby: joining players see each other in the room roster', async (t) => {
+  const alice = await connect(sharedPort, 'lobby-roster-alice');
+  const aliceLobby = createLobbyState(alice);
+  t.after(() => closeSocket(alice));
+  alice.emit('joinLobby', { lobbyRoomId: 'beginner', name: 'Alice' });
+  await waitState(aliceLobby, (state) => state.roster.includes('Alice'));
+
+  const bob = await connect(sharedPort, 'lobby-roster-bob');
+  const bobLobby = createLobbyState(bob);
+  t.after(() => closeSocket(bob));
+  bob.emit('joinLobby', { lobbyRoomId: 'beginner', name: 'Bob' });
+
+  await waitState(aliceLobby, (state) => state.roster.includes('Bob'));
+  await waitState(bobLobby, (state) => state.roster.includes('Alice') && state.roster.includes('Bob'));
+});
+
+test('lobby: chat broadcasts within a room and stays isolated from other rooms', async (t) => {
+  const beginnerA = await connect(sharedPort, 'chat-beg-a');
+  const beginnerB = await connect(sharedPort, 'chat-beg-b');
+  const expertC = await connect(sharedPort, 'chat-exp-c');
+  t.after(() => [beginnerA, beginnerB, expertC].forEach(closeSocket));
+
+  const beginnerALobby = createLobbyState(beginnerA);
+  const beginnerBLobby = createLobbyState(beginnerB);
+  const expertCLobby = createLobbyState(expertC);
+  beginnerA.emit('joinLobby', { lobbyRoomId: 'beginner', name: 'A' });
+  beginnerB.emit('joinLobby', { lobbyRoomId: 'beginner', name: 'B' });
+  expertC.emit('joinLobby', { lobbyRoomId: 'expert', name: 'C' });
+  await waitState(beginnerALobby, (state) => state.roster.includes('A') && state.roster.includes('B'));
+  await waitState(beginnerBLobby, (state) => state.roster.includes('A') && state.roster.includes('B'));
+  await waitState(expertCLobby, (state) => state.roster.includes('C'));
+
+  const gotChat = waitFor(beginnerB, 'lobbyChatMessage', (message) => message.text === 'hello beginners');
+  const expertHeardNothing = waitFor(expertC, 'lobbyChatMessage', () => true, 400)
+    .then(() => true)
+    .catch(() => false);
+
+  beginnerA.emit('sendLobbyChat', { lobbyRoomId: 'beginner', text: 'hello beginners' });
+
+  const message = await gotChat;
+  assert.equal(message.name, 'A');
+  assert.equal(await expertHeardNothing, false, 'a room outside the sender never receives the message');
+});
+
+test('lobby table: joining a numbered table seats the player and updates occupancy for lobby watchers', async (t) => {
+  const watcher = await connect(sharedPort, 'table-watch');
+  const watcherLobby = createLobbyState(watcher);
+  t.after(() => closeSocket(watcher));
+  watcher.emit('joinLobby', { lobbyRoomId: 'advance', name: 'Watcher' });
+  await waitState(watcherLobby, (state) => Array.isArray(state.tables) && state.tables.length === 50);
+
+  const player = await connect(sharedPort, 'table-player');
+  const playerState = createState(player);
+  t.after(() => closeSocket(player));
+  player.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 12, name: 'Solo' });
+  await waitState(playerState, (state) => state.players.some((seat) => seat && seat.isYou));
+
+  const updated = await waitState(watcherLobby, (state) => state.tables[11].seatedCount === 1);
+  assert.equal(updated.tables[11].tableNumber, 12);
+  assert.deepEqual(updated.tables[11].names, ['Solo']);
+});
+
+test('lobby table: a fifth arrival at a full table becomes a spectator instead of being rejected', async (t) => {
+  const tokens = ['spec-p1', 'spec-p2', 'spec-p3', 'spec-p4'];
+  const sockets = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 33, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await Promise.all(sockets.map((seatSocket) => waitFor(seatSocket, 'roomState', (payload) => payload.players.filter(Boolean).length === 4)));
+
+  const watcher = await connect(sharedPort, 'spec-watcher');
+  const watcherState = createState(watcher);
+  t.after(() => closeSocket(watcher));
+  watcher.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 33, name: 'Watcher' });
+  const seen = await waitState(watcherState, (state) => state.isSpectator === true);
+  assert.equal(seen.players.filter(Boolean).length, 4);
+  seen.players.forEach((seat) => assert.equal(seat.hand.length, 0, 'a spectator never receives anyone\'s hand'));
+});
+
+test('leaveTable: leaving before a hand starts frees the seat for someone else', async (t) => {
+  const solo = await connect(sharedPort, 'leave-solo');
+  const soloState = createState(solo);
+  t.after(() => closeSocket(solo));
+  solo.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 45, name: 'Solo' });
+  await waitState(soloState, (state) => state.players.some((seat) => seat && seat.isYou));
+
+  solo.emit('leaveTable', { roomCode: soloState().roomCode });
+
+  const other = await connect(sharedPort, 'leave-other');
+  const otherState = createState(other);
+  t.after(() => closeSocket(other));
+  other.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 45, name: 'Other' });
+  const seated = await waitState(otherState, (state) => state.players.filter(Boolean).length === 1);
+  assert.equal(seated.players.find((seat) => seat && seat.isYou).name, 'Other', 'the freed seat is available again, not stuck occupied');
+});
+
+test('leaveTable: leaving mid-hand converts the seat to a bot so the hand continues', async (t) => {
+  const tokens = ['leave-mid-1', 'leave-mid-2', 'leave-mid-3', 'leave-mid-4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 21, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await waitState(states[3], (state) => state.game && state.game.phase === 'bidding');
+
+  const roomCode = states[0]().roomCode;
+  sockets[1].emit('leaveTable', { roomCode });
+
+  const updated = await waitState(states[0], (state) => state.players[1] && state.players[1].isBot === true);
+  assert.equal(updated.players[1].connected, true);
+  assert.ok(updated.game, 'the table keeps broadcasting normally after the takeover');
+});
+
+test('leaveTable: a spectator can leave, freeing their spot in the room watchers count', async (t) => {
+  const tokens = ['spec-leave-1', 'spec-leave-2', 'spec-leave-3', 'spec-leave-4'];
+  const sockets = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 8, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await Promise.all(sockets.map((seatSocket) => waitFor(seatSocket, 'roomState', (payload) => payload.players.filter(Boolean).length === 4)));
+
+  const watcher = await connect(sharedPort, 'spec-leave-watcher');
+  const watcherState = createState(watcher);
+  const watcherLobby = createLobbyState(watcher);
+  t.after(() => closeSocket(watcher));
+  watcher.emit('joinLobby', { lobbyRoomId: 'expert', name: 'Watcher' });
+  watcher.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 8, name: 'Watcher' });
+  await waitState(watcherState, (state) => state.isSpectator === true);
+  await waitState(watcherLobby, (state) => state.tables[7].spectatorCount === 1);
+
+  watcher.emit('leaveTable', { roomCode: watcherState().roomCode });
+  await waitState(watcherLobby, (state) => state.tables[7].spectatorCount === 0);
+});
+
+test('lobby table: the first human to sit becomes host and can start early with bots filling the rest', async (t) => {
+  const solo = await connect(sharedPort, 'bot-start-solo');
+  const soloState = createState(solo);
+  t.after(() => closeSocket(solo));
+  solo.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 14, name: 'Solo' });
+  const seated = await waitState(soloState, (state) => state.players.some((seat) => seat && seat.isYou));
+  assert.equal(seated.isHost, true, 'the first person to sit becomes host of an empty lobby table');
+
+  solo.emit('startGame', { roomCode: seated.roomCode });
+  const started = await waitState(soloState, (state) => state.game && state.game.phase === 'bidding');
+  assert.equal(started.players.filter((seat) => seat && seat.isBot).length, 3, 'the empty seats fill with bots');
+});
+
+test('lobby table: locking blocks new public arrivals, but the table code still lets someone in', async (t) => {
+  const host = await connect(sharedPort, 'lock-host');
+  const hostState = createState(host);
+  t.after(() => closeSocket(host));
+  host.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 44, name: 'Host' });
+  const seated = await waitState(hostState, (state) => state.players.some((seat) => seat && seat.isYou));
+  const roomCode = seated.roomCode;
+
+  host.emit('toggleTableLock', { roomCode });
+  await waitState(hostState, (state) => state.locked === true);
+
+  const stranger = await connect(sharedPort, 'lock-stranger');
+  t.after(() => closeSocket(stranger));
+  const strangerError = waitFor(stranger, 'errorMessage');
+  stranger.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 44, name: 'Stranger' });
+  assert.equal(await strangerError, 'This table is locked. Ask for the table code to join.');
+
+  const friend = await connect(sharedPort, 'lock-friend');
+  const friendState = createState(friend);
+  t.after(() => closeSocket(friend));
+  friend.emit('joinRoom', { code: roomCode, name: 'Friend' });
+  const friendSeated = await waitState(friendState, (state) => state.players.filter(Boolean).length === 2);
+  assert.ok(friendSeated.players.find((seat) => seat && seat.isYou), 'the friend gets seated via the direct code despite the lock');
+});
+
+test('lobby table: a locked table is flagged in the room table grid', async (t) => {
+  const host = await connect(sharedPort, 'lock-flag-host');
+  const hostState = createState(host);
+  const hostLobby = createLobbyState(host);
+  t.after(() => closeSocket(host));
+  host.emit('joinLobby', { lobbyRoomId: 'expert', name: 'Host' });
+  host.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 22, name: 'Host' });
+  const seated = await waitState(hostState, (state) => state.players.some((seat) => seat && seat.isYou));
+
+  host.emit('toggleTableLock', { roomCode: seated.roomCode });
+  await waitState(hostLobby, (state) => state.tables[21].locked === true);
+});
+
+test('lobby table: leaving an empty locked table resets the lock for the next arrivals', async (t) => {
+  const host = await connect(sharedPort, 'lock-reset-host');
+  const hostState = createState(host);
+  t.after(() => closeSocket(host));
+  host.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 19, name: 'Host' });
+  const seated = await waitState(hostState, (state) => state.players.some((seat) => seat && seat.isYou));
+  const roomCode = seated.roomCode;
+  host.emit('toggleTableLock', { roomCode });
+  await waitState(hostState, (state) => state.locked === true);
+
+  host.emit('leaveTable', { roomCode });
+
+  const newcomer = await connect(sharedPort, 'lock-reset-newcomer');
+  const newcomerState = createState(newcomer);
+  t.after(() => closeSocket(newcomer));
+  newcomer.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 19, name: 'Newcomer' });
+  const arrived = await waitState(newcomerState, (state) => state.players.some((seat) => seat && seat.isYou));
+  assert.equal(arrived.locked, false, 'the lock resets once the table empties out');
+});
+
+test('lobby table: the hand auto-starts once four humans are seated, no host action needed', async (t) => {
+  const tokens = ['auto-p1', 'auto-p2', 'auto-p3', 'auto-p4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 40, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await waitState(states[3], (state) => state.game && state.game.phase === 'bidding');
 });
