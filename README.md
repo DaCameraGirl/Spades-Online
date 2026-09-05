@@ -10,7 +10,7 @@ A real-time 4-player Spades room starter built for online play from different lo
 - Join a room from another browser or machine
 - 4 seats per table
 - Stake selection for 250 / 500 / 1000 tables
-- Basic Spades flow: deal, bid, play cards, scoring
+- Basic Spades flow: deal, bid, nil, play cards, scoring
 - Oval casino table with your seat on the south rail
 - Trick cards play into the center of the felt
 - 13-card fan along the bottom rail
@@ -68,7 +68,6 @@ The first load after idle can take about a minute while Render wakes the free se
 
 ## Next upgrade ideas
 
-- nil / blind nil bidding
 - sandbag tracking
 - chat
 - spectator mode

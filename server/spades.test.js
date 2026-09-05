@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sortHand, pickBotCard, determineWinner } = require('./spades');
+const { sortHand, pickBotCard, determineWinner, scoreTeamSeats } = require('./spades');
 
 function card(rank, suit) {
   return { rank, suit, code: `${rank}${suit[0]}` };
@@ -121,4 +121,41 @@ test('ace of clubs wins unless a spade is played', () => {
     { seat: 3, card: card('Q', 'Clubs') },
   ];
   assert.equal(determineWinner(trumped, 'Clubs'), 2);
+});
+test('nil bidder succeeds for +100 while partner contract still scores', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 0, 2: 4 },
+    { 0: 0, 2: 5 }
+  );
+  assert.equal(score, 141);
+});
+
+test('nil bidder fails for -100 and taken tricks count toward the team hand', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 0, 2: 4 },
+    { 0: 1, 2: 4 }
+  );
+  assert.equal(score, -59);
+});
+
+test('nil bot leads low and avoids taking when it can duck', () => {
+  const leadHand = [card('A', 'Clubs'), card('4', 'Clubs'), card('2', 'Spades')];
+  const lead = pickBotCard(leadHand, null, false, [], 0, 'ace', { 0: 0, 2: 4 });
+  assert.equal(lead.rank, '4');
+  assert.equal(lead.suit, 'Clubs');
+
+  const followHand = [card('K', 'Clubs'), card('3', 'Clubs'), card('9', 'Hearts')];
+  const follow = pickBotCard(followHand, 'Clubs', false, [{ seat: 1, card: card('A', 'Clubs') }], 0, 'ace', { 0: 0, 2: 4 });
+  assert.equal(follow.rank, 'K');
+  assert.equal(follow.suit, 'Clubs');
+});
+
+test('bot covers partner nil by overtaking the nil partner when possible', () => {
+  const hand = [card('K', 'Clubs'), card('3', 'Clubs'), card('9', 'Hearts')];
+  const trick = [{ seat: 0, card: card('Q', 'Clubs') }];
+  const played = pickBotCard(hand, 'Clubs', false, trick, 2, 'ace', { 0: 0, 2: 4 });
+  assert.equal(played.rank, 'K');
+  assert.equal(played.suit, 'Clubs');
 });

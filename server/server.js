@@ -21,7 +21,7 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
-const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit } = require('./spades');
+const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats } = require('./spades');
 
 const STAKES = [250, 500, 1000];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -250,23 +250,12 @@ function attachPlayer(room, player, socket) {
   broadcastRoom(room);
 }
 
-function scoreTeam(teamBid, tricksWon) {
-  if (tricksWon >= teamBid) {
-    return teamBid * 10 + (tricksWon - teamBid);
-  }
-  return -teamBid * 10;
-}
-
 function finishHand(room) {
   if (!room.game) return;
 
-  const team0Bid = (room.game.bids[0] || 0) + (room.game.bids[2] || 0);
-  const team1Bid = (room.game.bids[1] || 0) + (room.game.bids[3] || 0);
-  const team0Tricks = room.game.tricksWon[0] || 0;
-  const team1Tricks = room.game.tricksWon[1] || 0;
-
-  const team0Score = scoreTeam(team0Bid, team0Tricks);
-  const team1Score = scoreTeam(team1Bid, team1Tricks);
+  const tricksBySeat = room.game.tricksBySeat || { 0: 0, 1: 0, 2: 0, 3: 0 };
+  const team0Score = scoreTeamSeats([0, 2], room.game.bids, tricksBySeat);
+  const team1Score = scoreTeamSeats([1, 3], room.game.bids, tricksBySeat);
 
   room.game.totalScores[0] = (room.game.totalScores[0] || 0) + team0Score;
   room.game.totalScores[1] = (room.game.totalScores[1] || 0) + team1Score;
@@ -397,7 +386,8 @@ function handleBotTurn(room) {
       room.game.spadesBroken,
       room.game.trick,
       room.game.currentSeat,
-      room.rankMode
+      room.rankMode,
+      room.game.bids
     ) || current.hand[0];
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
@@ -456,7 +446,7 @@ function dealHand(room, { preserveScores = false } = {}) {
     tricksWon: { 0: 0, 1: 0 },
     tricksBySeat: { 0: 0, 1: 0, 2: 0, 3: 0 },
     totalScores: previousScores,
-    message: 'Bidding is open. Choose a bid from 0 to 13.',
+    message: 'Bidding is open. Choose Nil or bid from 1 to 13.',
   };
 
   room.status = 'playing';

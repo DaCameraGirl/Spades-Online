@@ -21,7 +21,7 @@
           <h1>Spades Online</h1>
         </div>
         <div class="header-actions">
-          <button id="soundToggle" type="button" class="sound-toggle" aria-pressed="true">Sound on</button>
+          <button id="soundToggle" type="button" class="sound-toggle" data-sound-toggle aria-pressed="true">Sound test</button>
           <div id="statusBadge" class="status-badge">Offline</div>
         </div>
       </header>
@@ -95,6 +95,7 @@
                   <span>Stake</span>
                   <strong id="stakeLabel">250</strong>
                 </div>
+                <button id="gameSoundToggle" type="button" class="sound-toggle game-sound-toggle" data-sound-toggle aria-pressed="true">Sound test</button>
                 <button id="startGameBtn" class="primary">Start game</button>
               </div>
             </div>
@@ -139,7 +140,7 @@
               <div class="bid-row">
                 <label for="bidSelect">Bid</label>
                 <select id="bidSelect">
-                  <option value="0">0</option>
+                  <option value="0">Nil</option>
                   <option value="1">1</option>
                   <option value="2">2</option>
                   <option value="3">3</option>
