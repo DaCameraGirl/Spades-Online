@@ -40,6 +40,18 @@ http://localhost:3000
 
 For solo testing, create a room as the host and start the table with one human player. The server fills the remaining seats with bots automatically.
 
+
+## Desktop layout verification
+
+The active table is designed as a fixed-height game client on desktop. It should fit without vertical gameplay scrolling at `1440x900`, `1366x768`, and `1280x720` CSS viewports.
+
+With the local server running, verify the casino table layout with:
+
+```bash
+SMOKE_PORT=3025 npm run verify:ui
+```
+
+The script creates a room, starts a bot-filled table, checks bidding and play-ready states, and writes screenshots plus metrics to `tmp-ui/`.
 ## Play with people in another state
 
 Use the live Render URL, not GitHub and not localhost:

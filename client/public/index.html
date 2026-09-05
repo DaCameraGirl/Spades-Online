@@ -67,99 +67,100 @@
         </section>
 
         <section id="table" class="panel">
-          <div class="table-topbar">
-            <div class="room-share">
-              <p class="eyebrow">Room code</p>
-              <h3 id="roomCodeLabel">—</h3>
-              <button id="copyInviteBtn" type="button" class="invite-btn">Copy invite link</button>
-            </div>
-            <div>
-              <p class="eyebrow">Stake</p>
-              <h3 id="stakeLabel">250</h3>
-            </div>
-            <button id="startGameBtn" class="primary">Start game</button>
-          </div>
+          <div class="game-client">
+            <div class="table-hud">
+              <div class="room-share">
+                <p class="eyebrow">Room</p>
+                <h3 id="roomCodeLabel">&mdash;</h3>
+                <button id="copyInviteBtn" type="button" class="invite-btn">Copy invite link</button>
+              </div>
 
-          <div class="table-scoreboard">
-            <div class="score-box">
-              <span class="score-label">Team 1</span>
-              <strong id="teamOneScore">0</strong>
-            </div>
-            <div class="score-box center-box">
-              <span class="score-label">Left</span>
-              <strong id="handMeterValue">13</strong>
-            </div>
-            <div class="score-box">
-              <span class="score-label">Team 2</span>
-              <strong id="teamTwoScore">0</strong>
-            </div>
-          </div>
-
-          <div class="hand-meter-shell">
-            <div class="hand-meter-track">
-              <div id="handMeterFill" class="hand-meter-fill"></div>
-            </div>
-          </div>
-
-          <div class="table-rail">
-            <div class="table-felt">
-              <div class="table-glow"></div>
-
-              <div class="table-pit" aria-label="Cards in play">
-                <div id="trickNorth" class="trick-slot north"></div>
-                <div id="trickEast" class="trick-slot east"></div>
-                <div id="trickSouth" class="trick-slot south"></div>
-                <div id="trickWest" class="trick-slot west"></div>
-                <div class="pot-box">
-                  <span>POT</span>
-                  <strong id="potValue">$250</strong>
+              <div class="table-scoreboard">
+                <div class="score-box">
+                  <span class="score-label">Team 1</span>
+                  <strong id="teamOneScore">0</strong>
+                </div>
+                <div class="score-box center-box">
+                  <span class="score-label">Left</span>
+                  <strong id="handMeterValue">13</strong>
+                </div>
+                <div class="score-box">
+                  <span class="score-label">Team 2</span>
+                  <strong id="teamTwoScore">0</strong>
                 </div>
               </div>
 
-              <div class="chip-panel" aria-label="Chips panel">
-                <div class="chip-stack chip-stack-red"><span>250</span></div>
-                <div class="chip-stack chip-stack-gold"><span>500</span></div>
-                <div class="chip-stack chip-stack-blue"><span>1000</span></div>
-              </div>
-
-              <div id="tableSeats" class="table-seats"></div>
-            </div>
-          </div>
-
-          <div class="game-panel">
-            <div class="game-meta">
-              <div>
-                <p class="eyebrow">Status</p>
-                <p id="gameMessage">Waiting for players.</p>
-              </div>
-              <div>
-                <p class="eyebrow">Current turn</p>
-                <p id="turnLabel">—</p>
+              <div class="hud-actions">
+                <div class="stake-chip">
+                  <span>Stake</span>
+                  <strong id="stakeLabel">250</strong>
+                </div>
+                <button id="startGameBtn" class="primary">Start game</button>
               </div>
             </div>
 
-            <div class="bid-row">
-              <label for="bidSelect">Bid</label>
-              <select id="bidSelect">
-                <option value="0">0</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-                <option value="6">6</option>
-                <option value="7">7</option>
-                <option value="8">8</option>
-                <option value="9">9</option>
-                <option value="10">10</option>
-                <option value="11">11</option>
-                <option value="12">12</option>
-                <option value="13">13</option>
-              </select>
-              <button id="bidBtn" type="button" class="secondary">Submit bid</button>
+            <div class="hand-meter-shell" aria-hidden="true">
+              <div class="hand-meter-track">
+                <div id="handMeterFill" class="hand-meter-fill"></div>
+              </div>
             </div>
 
-            <div id="handArea" class="hand-area"></div>
+            <div class="casino-stage">
+              <div class="table-rail">
+                <div class="table-felt">
+                  <div class="table-glow"></div>
+
+                  <div class="table-message">
+                    <p id="gameMessage">Waiting for players.</p>
+                    <span>Turn: <strong id="turnLabel">&mdash;</strong></span>
+                  </div>
+
+                  <div class="table-pit" aria-label="Cards in play">
+                    <div id="trickNorth" class="trick-slot north"></div>
+                    <div id="trickEast" class="trick-slot east"></div>
+                    <div id="trickSouth" class="trick-slot south"></div>
+                    <div id="trickWest" class="trick-slot west"></div>
+                    <div class="pot-box">
+                      <span>POT</span>
+                      <strong id="potValue">$250</strong>
+                    </div>
+                  </div>
+
+                  <div class="chip-panel" aria-label="Chips panel">
+                    <div class="chip-stack chip-stack-red"><span>250</span></div>
+                    <div class="chip-stack chip-stack-gold"><span>500</span></div>
+                    <div class="chip-stack chip-stack-blue"><span>1000</span></div>
+                  </div>
+
+                  <div id="tableSeats" class="table-seats"></div>
+                </div>
+              </div>
+
+              <div class="bid-row">
+                <label for="bidSelect">Bid</label>
+                <select id="bidSelect">
+                  <option value="0">0</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                  <option value="10">10</option>
+                  <option value="11">11</option>
+                  <option value="12">12</option>
+                  <option value="13">13</option>
+                </select>
+                <button id="bidBtn" type="button" class="secondary">Submit bid</button>
+              </div>
+
+              <div class="hand-dock">
+                <div id="handArea" class="hand-area"></div>
+              </div>
+            </div>
           </div>
         </section>
       </main>
