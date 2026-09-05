@@ -8,11 +8,15 @@
     "start": "node server/server.js",
     "dev": "node server/server.js",
     "test": "node --test server/*.test.js",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "verify:ui": "node scripts/verify-ui.js"
   },
   "dependencies": {
     "express": "^4.19.2",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.43.1"
   }
 }

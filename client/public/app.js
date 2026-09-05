@@ -198,6 +198,7 @@ function setError(message) {
 function showTable() {
   lobbySection.classList.remove('active');
   tableSection.classList.add('active');
+  document.body.classList.add('game-active');
 }
 
 function markConnected() {
@@ -272,6 +273,20 @@ function cardMarkup(card) {
   `;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"]/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+  }[char]));
+}
+
+function playerInitials(name) {
+  const words = String(name || 'Player').trim().split(/\s+/).slice(0, 2);
+  return words.map((word) => word[0] || '').join('').toUpperCase() || 'P';
+}
+
 function renderSeats() {
   if (!roomState) return;
 
@@ -279,8 +294,8 @@ function renderSeats() {
 
   roomState.players.forEach((player, seatIndex) => {
     const seatCard = document.createElement('div');
-    seatCard.className = 'seat-card';
     const pos = seatLayout(seatIndex);
+    seatCard.className = `seat-card seat-${pos.slot}`;
     seatCard.style.left = `${pos.left}%`;
     seatCard.style.top = `${pos.top}%`;
 
@@ -291,12 +306,12 @@ function renderSeats() {
     if (!player) {
       seatCard.classList.add('empty');
       seatCard.innerHTML = `
-        <div class="seat-topline">
-          <span class="seat-tag">Seat ${seatIndex + 1}</span>
-          <span class="seat-badge">Open</span>
+        <div class="seat-medallion empty-medallion" aria-hidden="true">${seatIndex + 1}</div>
+        <div class="seat-copy">
+          <div class="seat-name">Open seat</div>
+          <div class="seat-stats"><span>Waiting</span></div>
         </div>
-        <h4>Open seat</h4>
-        <p>Waiting for a player</p>
+        <span class="seat-badge">Open</span>
       `;
       tableSeats.appendChild(seatCard);
       return;
@@ -308,30 +323,39 @@ function renderSeats() {
 
     const partnerSeat = mySeat == null ? null : (mySeat + 2) % 4;
     const isDisconnected = !player.isBot && player.connected === false;
+    const isPartner = partnerSeat === player.seat;
     if (isDisconnected) seatCard.classList.add('disconnected');
+    if (player.isYou) seatCard.classList.add('is-you');
+    if (isPartner) seatCard.classList.add('partner-seat');
+    if (player.isBot) seatCard.classList.add('bot-seat');
+
     const badge = isDisconnected
       ? 'Disconnected'
       : player.isYou
         ? 'You'
-        : partnerSeat === player.seat
+        : isPartner
           ? 'Partner'
           : player.isBot
             ? 'Bot'
             : 'Player';
     const tricks = player.tricks ?? 0;
+    const safeName = escapeHtml(player.name);
+    const initials = player.isBot ? 'AI' : escapeHtml(playerInitials(player.name));
 
     seatCard.innerHTML = `
-      <div class="seat-topline">
-        <span class="seat-tag">Seat ${player.seat + 1}</span>
-        <span class="seat-badge">${badge}</span>
+      <div class="seat-medallion" aria-hidden="true">${initials}</div>
+      <div class="seat-copy">
+        <div class="seat-name" title="${safeName}">${safeName}</div>
+        <div class="seat-stats">
+          <span>Bid <strong>${player.bid ?? '&mdash;'}</strong></span>
+          <span>Tricks <strong>${tricks}</strong></span>
+        </div>
       </div>
-      <h4>${player.name}</h4>
-      <p>Bid <strong>${player.bid ?? '—'}</strong> · Tricks <strong>${tricks}</strong></p>
+      <span class="seat-badge">${badge}</span>
     `;
     tableSeats.appendChild(seatCard);
   });
 }
-
 function renderHand() {
   if (!roomState || mySeat === null || typeof mySeat === 'undefined') {
     handArea.innerHTML = '';
@@ -460,6 +484,8 @@ function render() {
 
   const myPlayer = mySeat == null ? null : roomState.players[mySeat];
   const biddingOpen = roomState.game && roomState.game.phase === 'bidding';
+  tableSection.classList.toggle('is-bidding', Boolean(biddingOpen));
+  tableSection.dataset.phase = roomState.game ? roomState.game.phase : 'lobby';
   const alreadyBid = myPlayer && Number.isInteger(myPlayer.bid);
   const isMyBidTurn = biddingOpen && Number(roomState.game.currentSeat) === Number(mySeat);
   bidSelect.disabled = !isMyBidTurn;

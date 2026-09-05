@@ -1,19 +1,19 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const { io } = require('socket.io-client');
+const { effectiveSuit, isTrump } = require('../server/spades');
 
 const PORT = Number(process.env.SMOKE_PORT || 3017);
 const ROOT = path.join(__dirname, '..');
 
-function pickPlayable(hand, leadSuit, spadesBroken) {
+function pickPlayable(hand, leadSuit, spadesBroken, rankMode = 'deuces') {
   if (!hand.length) return null;
   if (!leadSuit) {
-    if (!spadesBroken && hand.some((card) => card.suit !== 'Spades')) {
-      return hand.find((card) => card.suit !== 'Spades');
-    }
+    const nonTrump = hand.find((card) => !isTrump(card, rankMode));
+    if (!spadesBroken && nonTrump) return nonTrump;
     return hand[0];
   }
-  const follow = hand.filter((card) => card.suit === leadSuit);
+  const follow = hand.filter((card) => effectiveSuit(card, rankMode) === leadSuit);
   return follow[0] || hand[0];
 }
 
@@ -132,7 +132,7 @@ async function main() {
 
       const me = snapshot.players.find((player) => player && player.isYou);
       if (!snapshot.game.resolving && snapshot.game.currentSeat === me.seat) {
-        const card = pickPlayable(me.hand, snapshot.game.leadSuit, false);
+        const card = pickPlayable(me.hand, snapshot.game.leadSuit, snapshot.game.spadesBroken, snapshot.rankMode);
         if (!card) throw new Error('No playable card in hand');
         socket.emit('playCard', { roomCode: snapshot.roomCode, cardCode: card.code });
       }
