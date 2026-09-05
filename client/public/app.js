@@ -28,7 +28,7 @@ const createRoomBtn = document.getElementById('createRoomBtn');
 const joinRoomBtn = document.getElementById('joinRoomBtn');
 const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
-const soundToggle = document.getElementById('soundToggle');
+const soundToggles = [...document.querySelectorAll('[data-sound-toggle]')];
 const tableCall = document.getElementById('tableCall');
 const bidSelect = document.getElementById('bidSelect');
 const bidBtn = document.getElementById('bidBtn');
@@ -287,6 +287,11 @@ function playerInitials(name) {
   return words.map((word) => word[0] || '').join('').toUpperCase() || 'P';
 }
 
+function formatBid(bid) {
+  if (bid === 0) return 'Nil';
+  return bid ?? '&mdash;';
+}
+
 function renderSeats() {
   if (!roomState) return;
 
@@ -347,7 +352,7 @@ function renderSeats() {
       <div class="seat-copy">
         <div class="seat-name" title="${safeName}">${safeName}</div>
         <div class="seat-stats">
-          <span>Bid <strong>${player.bid ?? '&mdash;'}</strong></span>
+          <span>Bid <strong>${formatBid(player.bid)}</strong></span>
           <span>Tricks <strong>${tricks}</strong></span>
         </div>
       </div>
@@ -575,25 +580,39 @@ roomCodeInput.addEventListener('input', () => {
 });
 
 function syncSoundToggle() {
-  if (!soundToggle || !window.SpadesAudio) return;
+  if (!soundToggles.length || !window.SpadesAudio) return;
   const on = !SpadesAudio.isMuted();
-  soundToggle.textContent = on ? 'Test sound' : 'Sound off';
-  soundToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+  soundToggles.forEach((toggle) => {
+    toggle.textContent = on ? 'Sound test' : 'Sound off';
+    toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    toggle.title = on ? 'Play test sound' : 'Turn sound on';
+  });
 }
 
-if (soundToggle) {
+function activateSoundToggle() {
+  if (!window.SpadesAudio) return;
+  SpadesAudio.unlock();
+  if (SpadesAudio.isMuted()) SpadesAudio.setMuted(false);
+  else SpadesAudio.ping();
   syncSoundToggle();
-  soundToggle.addEventListener('click', () => {
-    SpadesAudio.unlock();
-    if (SpadesAudio.isMuted()) SpadesAudio.setMuted(false);
-    else SpadesAudio.ping();
-    syncSoundToggle();
+}
+
+soundToggles.forEach((toggle) => {
+  let lastPointerSoundAt = 0;
+  syncSoundToggle();
+  toggle.addEventListener('pointerdown', () => {
+    lastPointerSoundAt = Date.now();
+    activateSoundToggle();
   });
-  soundToggle.addEventListener('dblclick', () => {
+  toggle.addEventListener('click', () => {
+    if (Date.now() - lastPointerSoundAt < 500) return;
+    activateSoundToggle();
+  });
+  toggle.addEventListener('dblclick', () => {
     SpadesAudio.setMuted(true);
     syncSoundToggle();
   });
-}
+});
 
 if (copyInviteBtn) {
   copyInviteBtn.addEventListener('click', async () => {

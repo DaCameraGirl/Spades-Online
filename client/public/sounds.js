@@ -1,6 +1,7 @@
 const SpadesAudio = (() => {
   let ctx = null;
   let master = null;
+  let unlocked = false;
   let muted = window.localStorage.getItem('spadesSound') === 'off';
   let lastSpeech = '';
   let lastSpeechAt = 0;
@@ -17,11 +18,26 @@ const SpadesAudio = (() => {
     return ctx;
   }
 
+  function warm(audio) {
+    if (!audio || unlocked) return;
+    const buffer = audio.createBuffer(1, 1, audio.sampleRate);
+    const source = audio.createBufferSource();
+    source.buffer = buffer;
+    source.connect(master || audio.destination);
+    source.start(0);
+    unlocked = true;
+  }
+
   function unlock() {
     const audio = getCtx();
-    if (!audio) return Promise.resolve();
-    if (audio.state === 'suspended') return audio.resume().catch(() => {});
-    return Promise.resolve();
+    if (!audio) return Promise.resolve(null);
+    const resume = audio.state === 'suspended'
+      ? audio.resume().catch(() => null)
+      : Promise.resolve(audio);
+    return resume.then(() => {
+      if (audio.state === 'running') warm(audio);
+      return audio;
+    });
   }
 
   function setMuted(next) {
@@ -78,11 +94,21 @@ const SpadesAudio = (() => {
 
   function play(fn) {
     if (muted) return;
-    unlock().then(() => {
-      const audio = getCtx();
-      if (!audio) return;
-      fn(audio);
-    });
+    const audio = getCtx();
+    if (!audio) return;
+    const run = () => {
+      if (audio.state !== 'running') return;
+      try {
+        fn(audio);
+      } catch (error) {
+        console.warn('Spades audio failed', error);
+      }
+    };
+    if (audio.state === 'running') {
+      run();
+      return;
+    }
+    unlock().then(run);
   }
 
   function ping() {
@@ -173,8 +199,18 @@ const SpadesAudio = (() => {
     window.speechSynthesis.speak(utterance);
   }
 
-  return { unlock, setMuted, isMuted, ping, card, trump, chip, deal, turn, trickWon, spadesBroken, say };
+  function status() {
+    return {
+      muted,
+      contextState: ctx ? ctx.state : 'uninitialized',
+      unlocked,
+    };
+  }
+
+  return { unlock, setMuted, isMuted, ping, card, trump, chip, deal, turn, trickWon, spadesBroken, say, status };
 })();
+
+window.SpadesAudio = SpadesAudio;
 
 window.addEventListener('pointerdown', () => SpadesAudio.unlock());
 window.addEventListener('keydown', () => SpadesAudio.unlock());
