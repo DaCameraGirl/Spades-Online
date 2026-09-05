@@ -44,6 +44,7 @@ const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
 const leaveTableBtn = document.getElementById('leaveTableBtn');
 const lockTableBtn = document.getElementById('lockTableBtn');
+const turnTimerSelect = document.getElementById('turnTimerSelect');
 const soundToggles = [...document.querySelectorAll('[data-sound-toggle]')];
 const tableCall = document.getElementById('tableCall');
 const bidSelect = document.getElementById('bidSelect');
@@ -397,6 +398,8 @@ function renderSeats() {
     const tricks = player.tricks ?? 0;
     const safeName = escapeHtml(player.name);
     const initials = player.isBot ? 'AI' : escapeHtml(playerInitials(player.name));
+    const canVoteKick = mySeat != null && !player.isYou && !player.isBot;
+    const votes = player.votesAgainst || 0;
 
     seatCard.innerHTML = `
       <div class="seat-medallion" aria-hidden="true">${initials}</div>
@@ -408,7 +411,15 @@ function renderSeats() {
         </div>
       </div>
       <span class="seat-badge">${badge}</span>
+      ${canVoteKick ? `<button type="button" class="vote-kick-btn" title="Vote to kick">Vote kick${votes ? ` (${votes}/2)` : ''}</button>` : ''}
     `;
+
+    if (canVoteKick) {
+      seatCard.querySelector('.vote-kick-btn').addEventListener('click', () => {
+        socket.emit('voteKick', { roomCode: roomState.roomCode, targetSeat: seatIndex });
+      });
+    }
+
     tableSeats.appendChild(seatCard);
   });
 }
@@ -577,6 +588,10 @@ function render() {
   roomCodeLabel.textContent = roomState.roomCode || '';
   syncRoomUrl(roomState.roomCode);
   lockTableBtn.textContent = roomState.locked ? 'Unlock table' : 'Lock table';
+  turnTimerSelect.disabled = !roomState.isHost;
+  if (document.activeElement !== turnTimerSelect) {
+    turnTimerSelect.value = String(roomState.turnTimerSeconds || 0);
+  }
   stakeLabel.textContent = roomState.stake || '250';
   if (potValueEl) {
     potValueEl.textContent = `$${roomState.stake || 250}`;
@@ -800,6 +815,11 @@ soundToggles.forEach((toggle) => {
     SpadesAudio.setMuted(true);
     syncSoundToggle();
   });
+});
+
+turnTimerSelect.addEventListener('change', () => {
+  if (!roomState || !roomState.roomCode) return;
+  socket.emit('setTurnTimer', { roomCode: roomState.roomCode, seconds: Number(turnTimerSelect.value) });
 });
 
 lockTableBtn.addEventListener('click', () => {

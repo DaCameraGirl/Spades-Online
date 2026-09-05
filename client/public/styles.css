@@ -425,6 +425,21 @@ label {
   min-width: 0;
 }
 
+.turn-timer-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.turn-timer-label select {
+  min-height: 34px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .stake-chip {
   min-width: 76px;
   padding: 6px 10px;
@@ -941,6 +956,21 @@ label {
 
 .is-you .seat-badge { color: var(--teal); border-color: rgba(99, 208, 196, 0.34); }
 .partner-seat .seat-badge { color: var(--green); border-color: rgba(125, 204, 166, 0.32); }
+
+.vote-kick-btn {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 4px;
+  min-height: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(196, 69, 58, 0.14);
+  border: 1px solid rgba(196, 69, 58, 0.4);
+  color: #ffb4ae;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
 .disconnected .seat-badge { color: #e9c66d; border-color: rgba(233, 198, 109, 0.35); }
 
 .bid-row {

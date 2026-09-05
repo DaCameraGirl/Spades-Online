@@ -193,6 +193,8 @@ function persistRooms() {
     trickTimer: undefined,
     nextHandTimer: undefined,
     graceTimers: undefined,
+    kickVotes: undefined,
+    turnTimer: undefined,
   }));
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
   fs.writeFileSync(DATA_FILE, JSON.stringify(snapshot, null, 2));
@@ -218,6 +220,7 @@ function loadRooms() {
     room.spectators = [];
     room.locked = Boolean(room.locked);
     room.graceTimers = new Map();
+    room.kickVotes = new Map();
     room.lastActivityAt = room.lastActivityAt || Date.now();
     rooms.set(room.id, room);
   });
@@ -318,6 +321,7 @@ function seatPlayer(room, socketId, name, sessionToken) {
     ready: false,
     isBot: false,
   };
+  if (room.kickVotes) room.kickVotes.delete(seat);
   return true;
 }
 
@@ -362,6 +366,45 @@ function clearRoomTimers(room) {
     clearTimeout(room.nextHandTimer);
     room.nextHandTimer = null;
   }
+  if (room.turnTimer) {
+    clearTimeout(room.turnTimer);
+    room.turnTimer = null;
+  }
+}
+
+function clearTurnTimer(room) {
+  if (room.turnTimer) {
+    clearTimeout(room.turnTimer);
+    room.turnTimer = null;
+  }
+}
+
+function armTurnTimer(room) {
+  clearTurnTimer(room);
+  if (!room.turnTimerSeconds || !room.game || room.game.resolving) return;
+
+  const seatIndex = room.game.currentSeat;
+  const player = room.players[seatIndex];
+  if (!player || player.isBot) return;
+
+  room.turnTimer = setTimeout(() => {
+    room.turnTimer = null;
+    if (!room.game || room.game.resolving || room.game.currentSeat !== seatIndex) return;
+    const current = room.players[seatIndex];
+    if (!current || current.isBot) return;
+
+    const timedOutSocket = io.sockets.sockets.get(current.socketId);
+    const result = vacateSeat(room, seatIndex);
+    if (timedOutSocket) {
+      addSpectator(room, timedOutSocket.id, current.name);
+      timedOutSocket.emit('errorMessage', 'You timed out and were moved to spectating.');
+    }
+    persistRooms();
+    if (!result.deleted) {
+      broadcastRoom(room);
+      if (result.gameInProgress) continueTurn(room);
+    }
+  }, room.turnTimerSeconds * 1000);
 }
 
 function getRoomByCode(code) {
@@ -440,10 +483,16 @@ function pickBotBid(hand) {
 }
 
 function continueTurn(room) {
-  if (!room || !room.game || room.game.resolving) return;
-  if (isBotPlayer(room.players[room.game.currentSeat])) {
-    queueBotTurn(room);
+  if (!room || !room.game || room.game.resolving) {
+    if (room) clearTurnTimer(room);
+    return;
   }
+  if (isBotPlayer(room.players[room.game.currentSeat])) {
+    clearTurnTimer(room);
+    queueBotTurn(room);
+    return;
+  }
+  armTurnTimer(room);
 }
 
 function queueBotTurn(room) {
@@ -641,6 +690,7 @@ function buildPlayerPayload(room, socketId) {
       isBot: Boolean(player.isBot),
       tricks: room.game && room.game.tricksBySeat ? room.game.tricksBySeat[player.seat] || 0 : 0,
       team: teamForSeat(player.seat),
+      votesAgainst: room.kickVotes && room.kickVotes.get(player.seat) ? room.kickVotes.get(player.seat).size : 0,
     };
   });
 
@@ -675,6 +725,7 @@ function buildPlayerPayload(room, socketId) {
     tableNumber: room.tableNumber || null,
     isSpectator: Boolean((room.spectators || []).some((spectator) => spectator.socketId === socketId)),
     locked: Boolean(room.locked),
+    turnTimerSeconds: room.turnTimerSeconds || 0,
   };
 }
 
@@ -828,6 +879,66 @@ io.on('connection', (socket) => {
       broadcastRoom(room);
       if (result.gameInProgress) continueTurn(room);
     }
+  });
+
+  socket.on('voteKick', ({ roomCode, targetSeat }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+
+    const voter = getPlayerInRoom(room, socket.id);
+    if (!voter) {
+      socket.emit('errorMessage', 'Only a seated player can vote to kick.');
+      return;
+    }
+
+    const seatIndex = Number(targetSeat);
+    if (seatIndex === voter.seat) {
+      socket.emit('errorMessage', 'You cannot vote to kick yourself.');
+      return;
+    }
+
+    const target = room.players[seatIndex];
+    if (!target || target.isBot) {
+      socket.emit('errorMessage', 'There is no one in that seat to kick.');
+      return;
+    }
+
+    room.kickVotes = room.kickVotes || new Map();
+    const votes = room.kickVotes.get(seatIndex) || new Set();
+    votes.add(voter.sessionToken);
+    room.kickVotes.set(seatIndex, votes);
+
+    if (votes.size < 2) {
+      broadcastRoom(room);
+      return;
+    }
+
+    room.kickVotes.delete(seatIndex);
+    const kickedSocket = io.sockets.sockets.get(target.socketId);
+    const result = vacateSeat(room, seatIndex);
+    persistRooms();
+    if (kickedSocket) {
+      kickedSocket.leave(room.code);
+      kickedSocket.data.roomCode = null;
+      kickedSocket.emit('errorMessage', 'You were voted off this table.');
+    }
+    if (!result.deleted) {
+      broadcastRoom(room);
+      if (result.gameInProgress) continueTurn(room);
+    }
+  });
+
+  socket.on('setTurnTimer', ({ roomCode, seconds }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    if (room.hostSocketId !== socket.id) {
+      socket.emit('errorMessage', 'Only the host can set the turn timer.');
+      return;
+    }
+    const value = Math.max(0, Math.min(300, Math.floor(Number(seconds) || 0)));
+    room.turnTimerSeconds = value || null;
+    broadcastRoom(room);
+    armTurnTimer(room);
   });
 
   socket.on('toggleTableLock', ({ roomCode }) => {

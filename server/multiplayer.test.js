@@ -640,6 +640,79 @@ test('lobby table: leaving an empty locked table resets the lock for the next ar
   assert.equal(arrived.locked, false, 'the lock resets once the table empties out');
 });
 
+test('voteKick: two votes remove a seated human, converting the seat to a bot mid-hand', async (t) => {
+  const tokens = ['kick-1', 'kick-2', 'kick-3', 'kick-4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 27, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await waitState(states[3], (state) => state.game && state.game.phase === 'bidding');
+
+  const roomCode = states[0]().roomCode;
+  const targetSeat = 2;
+  const targetErrorPromise = waitFor(sockets[targetSeat], 'errorMessage');
+
+  sockets[0].emit('voteKick', { roomCode, targetSeat });
+  await waitState(states[0], (state) => (state.players[targetSeat].votesAgainst || 0) === 1);
+  assert.notEqual(states[0]().players[targetSeat].isBot, true, 'a single vote does not kick anyone');
+
+  sockets[1].emit('voteKick', { roomCode, targetSeat });
+
+  const updated = await waitState(states[0], (state) => state.players[targetSeat] && state.players[targetSeat].isBot === true);
+  assert.equal(updated.players[targetSeat].connected, true, 'a bot takes over so the hand can continue');
+  assert.equal(await targetErrorPromise, 'You were voted off this table.');
+});
+
+test('voteKick: you cannot vote to kick yourself', async (t) => {
+  const tokens = ['selfkick-1', 'selfkick-2', 'selfkick-3', 'selfkick-4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 31, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await waitState(states[3], (state) => state.players.filter(Boolean).length === 4);
+
+  const roomCode = states[0]().roomCode;
+  const selfError = waitFor(sockets[0], 'errorMessage');
+  sockets[0].emit('voteKick', { roomCode, targetSeat: 0 });
+  assert.equal(await selfError, 'You cannot vote to kick yourself.');
+});
+
+test('turn timer: a player who lets their turn expire is benched to a spectator and a bot takes over', async (t) => {
+  const tokens = ['timer-1', 'timer-2', 'timer-3', 'timer-4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 40, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  const started = await waitState(states[0], (state) => state.game && state.game.phase === 'bidding');
+  assert.equal(started.isHost, true, 'the first person to sit is host and may set the timer');
+
+  sockets[0].emit('setTurnTimer', { roomCode: started.roomCode, seconds: 1 });
+  await waitState(states[0], (state) => state.turnTimerSeconds === 1);
+
+  const timedOutSeat = started.game.currentSeat;
+  const timedOutError = waitFor(sockets[timedOutSeat], 'errorMessage');
+
+  const updated = await waitState(states[0], (state) => state.players[timedOutSeat].isBot === true, 3000, 'bench after timeout');
+  assert.equal(updated.players[timedOutSeat].connected, true, 'a bot takes over the abandoned seat');
+  assert.equal(await timedOutError, 'You timed out and were moved to spectating.');
+  await waitState(states[timedOutSeat], (state) => state.isSpectator === true, 3000, 'the timed-out player becomes a spectator at their own table');
+});
+
 test('lobby table: the hand auto-starts once four humans are seated, no host action needed', async (t) => {
   const tokens = ['auto-p1', 'auto-p2', 'auto-p3', 'auto-p4'];
   const sockets = [];
