@@ -46,13 +46,11 @@ const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
 const leaveTableBtn = document.getElementById('leaveTableBtn');
 const lockTableBtn = document.getElementById('lockTableBtn');
-const tableChatToggleBtn = document.getElementById('tableChatToggleBtn');
-const tableChatBadge = document.getElementById('tableChatBadge');
-const tableChatPanel = document.getElementById('tableChatPanel');
-const tableChatCloseBtn = document.getElementById('tableChatCloseBtn');
 const tableChatLog = document.getElementById('tableChatLog');
 const tableChatInput = document.getElementById('tableChatInput');
 const tableChatSendBtn = document.getElementById('tableChatSendBtn');
+const tablePlayerList = document.getElementById('tablePlayerList');
+const tableWatcherList = document.getElementById('tableWatcherList');
 const turnTimerSelect = document.getElementById('turnTimerSelect');
 const soundToggles = [...document.querySelectorAll('[data-sound-toggle]')];
 const tableCall = document.getElementById('tableCall');
@@ -307,17 +305,14 @@ socket.on('disconnect', () => {
 
 const RANK_ORDER = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13, A: 14 };
 
-function isTrumpCard(card, mode) {
-  if (card.suit === 'Spades') return true;
-  return mode === 'deuces' && card.rank === '2' && card.suit === 'Diamonds';
+function isTrumpCard(card) {
+  return card.suit === 'Spades';
 }
 
-function trumpPower(card, mode) {
-  if (!isTrumpCard(card, mode)) return 0;
-  if (mode === 'deuces') {
-    if (card.rank === '2' && card.suit === 'Spades') return 100;
-    if (card.rank === '2' && card.suit === 'Diamonds') return 99;
-  }
+// In 2s-high (deuces) mode, a 2 outranks the ace within its own suit;
+// spades is still the only trump suit.
+function rankValue(card, mode) {
+  if (mode === 'deuces' && card.rank === '2') return 15;
   return RANK_ORDER[card.rank];
 }
 
@@ -325,14 +320,14 @@ function sortHand(cards, mode = 'ace') {
   const suitOrder = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
 
   return [...cards].sort((a, b) => {
-    const aTrump = isTrumpCard(a, mode);
-    const bTrump = isTrumpCard(b, mode);
+    const aTrump = isTrumpCard(a);
+    const bTrump = isTrumpCard(b);
     const trumpDiff = Number(bTrump) - Number(aTrump);
     if (trumpDiff !== 0) return trumpDiff;
-    if (aTrump && bTrump) return trumpPower(b, mode) - trumpPower(a, mode);
+    if (aTrump && bTrump) return rankValue(b, mode) - rankValue(a, mode);
     const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
     if (suitDiff !== 0) return suitDiff;
-    return RANK_ORDER[b.rank] - RANK_ORDER[a.rank];
+    return rankValue(b, mode) - rankValue(a, mode);
   });
 }
 
@@ -645,14 +640,6 @@ function appendChatMessage(message) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-let tableChatUnread = 0;
-
-function setTableChatUnread(count) {
-  tableChatUnread = count;
-  tableChatBadge.textContent = String(count);
-  tableChatBadge.classList.toggle('hidden', count === 0);
-}
-
 function renderTableChatLine(message) {
   const line = document.createElement('div');
   line.className = 'chat-line';
@@ -661,29 +648,29 @@ function renderTableChatLine(message) {
   tableChatLog.scrollTop = tableChatLog.scrollHeight;
 }
 
-function appendTableChatMessage(message) {
-  renderTableChatLine(message);
-  if (tableChatPanel.classList.contains('hidden')) {
-    setTableChatUnread(tableChatUnread + 1);
+function renderTableRosters() {
+  if (!roomState) return;
+  tablePlayerList.innerHTML = '';
+  roomState.players.filter(Boolean).forEach((player) => {
+    const item = document.createElement('li');
+    item.textContent = player.isBot ? `${player.name} (bot)` : player.name;
+    tablePlayerList.appendChild(item);
+  });
+
+  const watchers = roomState.spectatorNames || [];
+  if (watchers.length) {
+    tableWatcherList.classList.remove('table-roster-empty');
+    tableWatcherList.textContent = '';
+    watchers.forEach((name) => {
+      const item = document.createElement('li');
+      item.textContent = name;
+      tableWatcherList.appendChild(item);
+    });
+  } else {
+    tableWatcherList.classList.add('table-roster-empty');
+    tableWatcherList.textContent = 'Nobody yet';
   }
 }
-
-function openTableChat() {
-  tableChatPanel.classList.remove('hidden');
-  setTableChatUnread(0);
-  tableChatInput.focus();
-}
-
-function closeTableChat() {
-  tableChatPanel.classList.add('hidden');
-}
-
-tableChatToggleBtn.addEventListener('click', () => {
-  if (tableChatPanel.classList.contains('hidden')) openTableChat();
-  else closeTableChat();
-});
-
-tableChatCloseBtn.addEventListener('click', closeTableChat);
 
 function sendTableChat() {
   const text = tableChatInput.value.trim();
@@ -709,6 +696,7 @@ function render() {
 
   roomCodeLabel.textContent = roomState.roomCode || '';
   syncRoomUrl(roomState.roomCode);
+  renderTableRosters();
   lockTableBtn.textContent = roomState.locked ? 'Unlock table' : 'Lock table';
   turnTimerSelect.disabled = !roomState.isHost;
   if (document.activeElement !== turnTimerSelect) {
@@ -817,12 +805,11 @@ socket.on('lobbyState', (payload) => {
 
 socket.on('tableChatHistory', (history) => {
   tableChatLog.innerHTML = '';
-  setTableChatUnread(0);
   (history || []).forEach(renderTableChatLine);
 });
 
 socket.on('tableChatMessage', (message) => {
-  appendTableChatMessage(message);
+  renderTableChatLine(message);
 });
 
 socket.on('lobbyChatHistory', (history) => {
@@ -985,8 +972,6 @@ leaveTableBtn.addEventListener('click', () => {
   roomState = null;
   mySeat = null;
   tableChatLog.innerHTML = '';
-  setTableChatUnread(0);
-  closeTableChat();
   if (wasLobbyTable) {
     showRoomView();
   } else {

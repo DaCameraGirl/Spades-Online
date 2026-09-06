@@ -174,7 +174,6 @@
                   <button id="copyInviteBtn" type="button" class="invite-btn">Copy invite link</button>
                   <button id="lockTableBtn" type="button" class="invite-btn">Lock table</button>
                   <button id="leaveTableBtn" type="button" class="invite-btn">Leave table</button>
-                  <button id="tableChatToggleBtn" type="button" class="invite-btn">Chat<span id="tableChatBadge" class="chat-badge hidden">0</span></button>
                 </div>
 
                 <div class="hud-settings-group">
@@ -207,6 +206,26 @@
                 <div id="handMeterFill" class="hand-meter-fill"></div>
               </div>
             </div>
+
+            <div class="table-body">
+              <div id="tableSidebar" class="table-sidebar">
+                <div class="table-sidebar-section">
+                  <p class="eyebrow">At this table</p>
+                  <ul id="tablePlayerList" class="table-roster-list"></ul>
+                </div>
+                <div class="table-sidebar-section">
+                  <p class="eyebrow">Watching</p>
+                  <ul id="tableWatcherList" class="table-roster-list table-roster-empty">Nobody yet</ul>
+                </div>
+                <div class="table-sidebar-chat">
+                  <p class="eyebrow">Table chat</p>
+                  <div id="tableChatLog" class="table-chat-log"></div>
+                  <div class="table-chat-input-row">
+                    <input id="tableChatInput" type="text" maxlength="200" placeholder="Say something..." />
+                    <button id="tableChatSendBtn" type="button" class="secondary">Send</button>
+                  </div>
+                </div>
+              </div>
 
             <div class="casino-stage">
               <div class="table-rail">
@@ -263,18 +282,7 @@
               <div class="hand-dock">
                 <div id="handArea" class="hand-area"></div>
               </div>
-
-              <div id="tableChatPanel" class="table-chat-panel hidden">
-                <div class="table-chat-header">
-                  <span>Table chat</span>
-                  <button id="tableChatCloseBtn" type="button" class="table-chat-close">&times;</button>
-                </div>
-                <div id="tableChatLog" class="table-chat-log"></div>
-                <div class="table-chat-input-row">
-                  <input id="tableChatInput" type="text" maxlength="200" placeholder="Say something..." />
-                  <button id="tableChatSendBtn" type="button" class="secondary">Send</button>
-                </div>
-              </div>
+            </div>
             </div>
           </div>
         </section>

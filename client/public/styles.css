@@ -239,63 +239,12 @@ body.game-active .topbar {
   position: relative;
 }
 
-.chat-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  margin-left: 6px;
-  border-radius: 999px;
-  background: var(--ruby);
-  color: white;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.table-chat-panel {
-  position: absolute;
-  right: 16px;
-  bottom: calc(var(--hand-zone) + 16px);
-  z-index: 30;
-  width: min(320px, 88vw);
-  max-height: 320px;
-  display: flex;
-  flex-direction: column;
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(20, 14, 10, 0.97), rgba(6, 4, 3, 0.98));
-  border: 1px solid rgba(233, 198, 109, 0.3);
-  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5);
-  pointer-events: auto;
-}
-
-.table-chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: var(--gold-strong);
-}
-
-.table-chat-close {
-  min-height: 0;
-  padding: 0 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 16px;
-}
-
 .table-chat-log {
   flex: 1;
-  min-height: 100px;
-  max-height: 180px;
+  min-height: 80px;
+  max-height: 220px;
   overflow-y: auto;
-  padding: 8px 12px;
+  padding: 4px 0;
   font-size: 13px;
 }
 
@@ -305,22 +254,20 @@ body.game-active .topbar {
 
 .table-chat-input-row {
   display: flex;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .table-chat-input-row input {
   flex: 1;
-  min-height: 36px;
+  min-width: 0;
+  min-height: 34px;
 }
 
-@media (max-width: 760px) {
-  .table-chat-panel {
-    right: 8px;
-    left: 8px;
-    width: auto;
-    bottom: calc(var(--hand-zone) + 8px);
-  }
+.table-chat-input-row button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 10px;
 }
 
 .sound-toggle[aria-pressed="false"] {
@@ -583,9 +530,63 @@ label {
   transition: width 0.25s ease;
 }
 
+.table-body {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+.table-sidebar {
+  width: 240px;
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.28);
+  border-right: 1px solid var(--line);
+}
+
+.table-sidebar-section {
+  flex: 0 0 auto;
+}
+
+.table-roster-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.table-roster-list li {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.table-roster-empty {
+  padding: 3px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.table-sidebar-chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 160px;
+}
+
+.table-sidebar-chat .table-chat-log {
+  flex: 1;
+}
+
 .casino-stage {
   --stage-pad: clamp(10px, 1.9dvh, 22px);
   position: relative;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   isolation: isolate;
@@ -1303,6 +1304,10 @@ label {
 
   .table-scoreboard {
     width: 260px;
+  }
+
+  .table-sidebar {
+    display: none;
   }
 
   .stake-chip span {

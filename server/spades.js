@@ -33,26 +33,29 @@ function isDeuces(mode) {
 
 function isTrump(card, mode = 'ace') {
   if (!card) return false;
-  if (card.suit === 'Spades') return true;
-  return isDeuces(mode) && card.rank === '2' && card.suit === 'Diamonds';
+  return card.suit === 'Spades';
 }
 
 function effectiveSuit(card, mode = 'ace') {
-  return isTrump(card, mode) ? 'Spades' : card.suit;
+  return card.suit;
+}
+
+// In 2s-high (deuces) mode, the 2 outranks the ace within its own suit —
+// spades stays the only trump suit, a 2 of hearts/clubs/diamonds just
+// becomes that suit's top card, it never trumps another suit.
+function rankValue(card, mode = 'ace') {
+  if (isDeuces(mode) && card.rank === '2') return 15;
+  return RANK_VALUES[card.rank];
 }
 
 function trumpPower(card, mode = 'ace') {
   if (!isTrump(card, mode)) return 0;
-  if (isDeuces(mode)) {
-    if (card.rank === '2' && card.suit === 'Spades') return 100;
-    if (card.rank === '2' && card.suit === 'Diamonds') return 99;
-  }
-  return RANK_VALUES[card.rank];
+  return rankValue(card, mode);
 }
 
 function followPower(card, mode = 'ace') {
   if (isTrump(card, mode)) return 1000 + trumpPower(card, mode);
-  return RANK_VALUES[card.rank];
+  return rankValue(card, mode);
 }
 
 function sortHand(hand, mode = 'ace') {
@@ -60,11 +63,11 @@ function sortHand(hand, mode = 'ace') {
     const trumpDiff = Number(isTrump(b, mode)) - Number(isTrump(a, mode));
     if (trumpDiff !== 0) return trumpDiff;
     if (isTrump(a, mode) && isTrump(b, mode)) {
-      return trumpPower(b, mode) - trumpPower(a, mode);
+      return rankValue(b, mode) - rankValue(a, mode);
     }
     const suitDiff = SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit);
     if (suitDiff !== 0) return suitDiff;
-    return RANK_VALUES[b.rank] - RANK_VALUES[a.rank];
+    return rankValue(b, mode) - rankValue(a, mode);
   });
 }
 
@@ -103,7 +106,7 @@ function cardBeats(candidate, current, leadSuit, mode = 'ace') {
   if (currTrump && !candTrump) return false;
   if (candTrump && currTrump) return trumpPower(candidate, mode) > trumpPower(current, mode);
   if (effectiveSuit(candidate, mode) === effectiveSuit(current, mode)) {
-    return RANK_VALUES[candidate.rank] > RANK_VALUES[current.rank];
+    return rankValue(candidate, mode) > rankValue(current, mode);
   }
   return effectiveSuit(candidate, mode) === leadSuit && effectiveSuit(current, mode) !== leadSuit && !currTrump;
 }

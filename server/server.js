@@ -753,6 +753,7 @@ function buildPlayerPayload(room, socketId) {
     lobbyRoomId: room.lobbyRoomId || null,
     tableNumber: room.tableNumber || null,
     isSpectator: Boolean((room.spectators || []).some((spectator) => spectator.socketId === socketId)),
+    spectatorNames: (room.spectators || []).map((spectator) => spectator.name),
     locked: Boolean(room.locked),
     turnTimerSeconds: room.turnTimerSeconds || 0,
   };
