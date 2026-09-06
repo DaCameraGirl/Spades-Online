@@ -88,7 +88,7 @@ test('in 2s high, all four deuces sort to the front of the hand, ahead of the ac
   const sorted = sortHand(hand, 'deuces');
   assert.deepEqual(
     sorted.map((c) => `${c.rank}${c.suit[0]}`),
-    ['2S', '2H', '2D', 'KS', 'AH', '9C'],
+    ['2H', '2S', '2D', 'KS', 'AH', '9C'],
   );
 });
 
@@ -125,20 +125,20 @@ test('in 2s high (deuces wild), every deuce becomes trump, not just its own suit
   assert.equal(determineWinner(twoDiamondsBeatsAnySpadeToo, 'Diamonds', 'deuces'), 0);
 });
 
-test('in 2s high, the four deuces rank among themselves as S > H > C > D', () => {
-  const twoHeartsBeatsTwoClubs = [
+test('in 2s high, the four deuces rank among themselves as H > S > C > D', () => {
+  const twoSpadesBeatsTwoClubs = [
     { seat: 0, card: card('2', 'Clubs') },
-    { seat: 1, card: card('2', 'Hearts') },
-  ];
-  assert.equal(determineWinner(twoHeartsBeatsTwoClubs, 'Clubs', 'deuces'), 1);
-
-  const twoSpadesBeatsEveryOtherDeuce = [
-    { seat: 0, card: card('2', 'Hearts') },
     { seat: 1, card: card('2', 'Spades') },
+  ];
+  assert.equal(determineWinner(twoSpadesBeatsTwoClubs, 'Clubs', 'deuces'), 1);
+
+  const twoHeartsBeatsEveryOtherDeuce = [
+    { seat: 0, card: card('2', 'Spades') },
+    { seat: 1, card: card('2', 'Hearts') },
     { seat: 2, card: card('2', 'Clubs') },
     { seat: 3, card: card('2', 'Diamonds') },
   ];
-  assert.equal(determineWinner(twoSpadesBeatsEveryOtherDeuce, 'Hearts', 'deuces'), 1);
+  assert.equal(determineWinner(twoHeartsBeatsEveryOtherDeuce, 'Spades', 'deuces'), 1);
 });
 
 test('in standard ace-high mode, twos stay low in every suit', () => {
@@ -182,6 +182,42 @@ test('nil bidder fails for -100 and taken tricks count toward the team hand', ()
     { 0: 1, 2: 4 }
   );
   assert.equal(score, -59);
+});
+
+test('a made individual bid of 10 scores 200 for the contract instead of bid*10', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 10, 2: 2 },
+    { 0: 10, 2: 2 }
+  );
+  assert.equal(score, 200);
+});
+
+test('a made bid of 10 with overtricks still adds the overtrick bonus on top of 200', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 10, 2: 2 },
+    { 0: 11, 2: 2 }
+  );
+  assert.equal(score, 201);
+});
+
+test('a failed bid of 10 still costs the normal bid*10, the bonus only applies when made', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 10, 2: 2 },
+    { 0: 8, 2: 2 }
+  );
+  assert.equal(score, -120);
+});
+
+test('a team bid summing to 10 without either player individually bidding 10 scores normally', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 6, 2: 4 },
+    { 0: 6, 2: 4 }
+  );
+  assert.equal(score, 100);
 });
 
 test('nil bot leads low and avoids taking when it can duck', () => {

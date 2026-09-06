@@ -825,7 +825,7 @@ function resetRoom(room) {
 app.use(express.static(path.join(__dirname, '../client/public')));
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, rooms: rooms.size, version: 'trump-v3-deuces-wild' });
+  res.json({ ok: true, rooms: rooms.size, version: 'trump-v4-hearts-boss' });
 });
 
 io.on('connection', (socket) => {

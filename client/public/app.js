@@ -341,6 +341,9 @@ function rankValue(card, mode) {
 }
 
 const SUIT_ORDER = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
+// House rule: among the four boss deuces, hearts outranks spades. Kept
+// separate from SUIT_ORDER, which still governs normal suit grouping.
+const DEUCE_ORDER = ['Hearts', 'Spades', 'Clubs', 'Diamonds'];
 
 function sortByTrumpAndSuit(cards, mode) {
   return [...cards].sort((a, b) => {
@@ -356,14 +359,14 @@ function sortByTrumpAndSuit(cards, mode) {
 }
 
 // In 2s-high mode the deuces are grouped at the very front of the hand
-// (spade 2 first, then hearts/clubs/diamonds), ahead of the aces, matching
+// (heart 2 first, then spades/clubs/diamonds), ahead of the aces, matching
 // how the server treats them as a top-of-hand group rather than just the
 // top card within each suit's own section.
 function sortHand(cards, mode = 'ace') {
   if (mode !== 'deuces') return sortByTrumpAndSuit(cards, mode);
 
   const twos = cards.filter((card) => card.rank === '2')
-    .sort((a, b) => SUIT_ORDER.indexOf(a.suit) - SUIT_ORDER.indexOf(b.suit));
+    .sort((a, b) => DEUCE_ORDER.indexOf(a.suit) - DEUCE_ORDER.indexOf(b.suit));
   const rest = cards.filter((card) => card.rank !== '2');
   return [...twos, ...sortByTrumpAndSuit(rest, mode)];
 }
