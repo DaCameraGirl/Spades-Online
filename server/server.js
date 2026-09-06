@@ -513,10 +513,11 @@ function continueTurn(room) {
 function queueBotTurn(room) {
   if (!room || !room.game || room.game.resolving) return;
   if (room.botTimer) clearTimeout(room.botTimer);
+  const jitter = BOT_DELAY_MS * (0.6 + Math.random() * 0.9);
   room.botTimer = setTimeout(() => {
     room.botTimer = null;
     handleBotTurn(room);
-  }, BOT_DELAY_MS);
+  }, jitter);
 }
 
 function resolveCompletedTrick(room) {
@@ -571,7 +572,9 @@ function handleBotTurn(room) {
       room.game.message = 'Bidding complete. Left of dealer leads.';
     } else {
       room.game.currentSeat = nextSeat(current.seat);
-      room.game.message = `${current.name} bids ${bid}. Waiting for ${remaining.length} more.`;
+      room.game.message = bid === 0
+        ? `${current.name} is going for Nil!`
+        : `${current.name} bids ${bid}. Waiting for ${remaining.length} more.`;
     }
 
     broadcastRoom(room);
@@ -1157,7 +1160,9 @@ io.on('connection', (socket) => {
       room.game.message = 'Bidding complete. Left of dealer leads.';
     } else {
       room.game.currentSeat = nextSeat(player.seat);
-      room.game.message = `Waiting for bids. ${remainingPlayers.length} seat(s) left.`;
+      room.game.message = nextBid === 0
+        ? `${player.name} is going for Nil!`
+        : `Waiting for bids. ${remainingPlayers.length} seat(s) left.`;
     }
 
     broadcastRoom(room);

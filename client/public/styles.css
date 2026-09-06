@@ -677,9 +677,30 @@ label {
   transform: rotate(-2deg);
 }
 
-.trick-slot.east .trick-card { transform: rotate(7deg); }
-.trick-slot.south .trick-card { transform: rotate(3deg); }
-.trick-slot.west .trick-card { transform: rotate(-7deg); }
+.trick-slot.north .trick-card { animation: throwFromNorth 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both; transform: rotate(-2deg); }
+.trick-slot.east .trick-card { animation: throwFromEast 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both; transform: rotate(7deg); }
+.trick-slot.south .trick-card { animation: throwFromSouth 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both; transform: rotate(3deg); }
+.trick-slot.west .trick-card { animation: throwFromWest 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both; transform: rotate(-7deg); }
+
+@keyframes throwFromNorth {
+  0% { opacity: 0; transform: translateY(-70px) rotate(-2deg) scale(0.85); }
+  100% { opacity: 1; transform: translateY(0) rotate(-2deg) scale(1); }
+}
+
+@keyframes throwFromSouth {
+  0% { opacity: 0; transform: translateY(70px) rotate(3deg) scale(0.85); }
+  100% { opacity: 1; transform: translateY(0) rotate(3deg) scale(1); }
+}
+
+@keyframes throwFromEast {
+  0% { opacity: 0; transform: translateX(70px) rotate(7deg) scale(0.85); }
+  100% { opacity: 1; transform: translateX(0) rotate(7deg) scale(1); }
+}
+
+@keyframes throwFromWest {
+  0% { opacity: 0; transform: translateX(-70px) rotate(-7deg) scale(0.85); }
+  100% { opacity: 1; transform: translateX(0) rotate(-7deg) scale(1); }
+}
 
 .trick-card.red,
 .mini-card.red,
@@ -792,6 +813,29 @@ label {
     inset 0 -7px 0 rgba(0, 0, 0, 0.28),
     0 2px 0 rgba(255, 255, 255, 0.2);
   position: relative;
+  opacity: 0.45;
+  transform: scale(0.92);
+  transition: opacity 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.chip-stack.active-chip {
+  opacity: 1;
+  transform: scale(1.08);
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 255, 255, 0.18),
+    inset 0 -7px 0 rgba(0, 0, 0, 0.28),
+    0 0 16px rgba(255, 215, 137, 0.45),
+    0 4px 0 rgba(255, 255, 255, 0.25);
+}
+
+.chip-panel.jingle .chip-stack.active-chip {
+  animation: chipJingle 0.4s ease;
+}
+
+@keyframes chipJingle {
+  0%, 100% { transform: scale(1.08) rotate(0deg); }
+  25% { transform: scale(1.14) rotate(-6deg); }
+  75% { transform: scale(1.14) rotate(6deg); }
 }
 
 .chip-stack::before {
@@ -1114,6 +1158,25 @@ label {
 @keyframes cardPop {
   0% { opacity: 0; transform: translateY(10px) scale(0.92); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes dealIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-220px) translateX(-40px) rotate(-40deg) scale(0.6);
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(var(--fan-angle)) translateY(var(--fan-lift));
+  }
+}
+
+.card-btn.card-dealt {
+  animation: dealIn 0.42s cubic-bezier(0.18, 0.82, 0.28, 1) both;
+  animation-delay: var(--deal-delay, 0ms);
 }
 
 @media (max-width: 900px) {

@@ -60,6 +60,8 @@ const teamTwoScoreEl = document.getElementById('teamTwoScore');
 const handMeterValueEl = document.getElementById('handMeterValue');
 const handMeterFillEl = document.getElementById('handMeterFill');
 const potValueEl = document.getElementById('potValue');
+const chipPanel = document.querySelector('.chip-panel');
+const chipStacks = [...document.querySelectorAll('.chip-stack')];
 const trickSlots = {
   north: document.getElementById('trickNorth'),
   east: document.getElementById('trickEast'),
@@ -80,6 +82,7 @@ let didAutoJoin = false;
 let lastAudio = null;
 let callTimer = null;
 let currentLobbyRoomId = null;
+let lastDealtRound = null;
 
 const LOBBY_ROOM_LABELS = {
   beginner: 'Beginner Room',
@@ -103,6 +106,14 @@ function syncRoomUrl(roomCode) {
   const url = new URL(window.location.href);
   url.searchParams.set('room', roomCode);
   window.history.replaceState({}, '', url);
+}
+
+let chipJingleTimer = null;
+function jingleChips() {
+  if (!chipPanel) return;
+  chipPanel.classList.add('jingle');
+  window.clearTimeout(chipJingleTimer);
+  chipJingleTimer = window.setTimeout(() => chipPanel.classList.remove('jingle'), 420);
 }
 
 function showTableCall(text) {
@@ -136,6 +147,8 @@ function playTableSounds(nextState) {
       resolving: Boolean(game.resolving),
       spadesBroken: Boolean(game.spadesBroken),
       bids: bidTotal(nextState.players),
+      bidsBySeat: nextState.players.map((player) => (player ? player.bid : null)),
+      matchOver: Boolean(game && game.matchOver),
       mySeat,
     }
     : null;
@@ -159,6 +172,14 @@ function playTableSounds(nextState) {
 
   if (game.bids && prev.bids < bidTotal(nextState.players)) {
     SpadesAudio.chip();
+    jingleChips();
+    nextState.players.forEach((player, seatIndex) => {
+      const justBidNil = player && player.bid === 0 && prev.bidsBySeat[seatIndex] == null;
+      if (justBidNil) {
+        SpadesAudio.say(`${player.isYou ? 'You are' : `${player.name} is`} going for Nil!`);
+        showTableCall(`${player.name} is going for Nil!`);
+      }
+    });
   }
 
   if (prev.phase === 'bidding' && game.phase === 'playing') {
@@ -178,13 +199,21 @@ function playTableSounds(nextState) {
 
   if (!prev.resolving && game.resolving) {
     SpadesAudio.trickWon();
+    jingleChips();
   }
 
   if (game.phase === 'finished' && prev.phase !== 'finished') {
     const one = game.scores ? game.scores[0] : 0;
     const two = game.scores ? game.scores[1] : 0;
-    SpadesAudio.say('Hand complete.');
-    showTableCall(`Hand complete  ${one} – ${two}`);
+    if (game.matchOver) {
+      const wonMyTeam = mySeat != null && game.matchWinner === (mySeat % 2);
+      SpadesAudio.matchWin(wonMyTeam);
+      SpadesAudio.say(`Team ${game.matchWinner + 1} wins the match!`);
+      showTableCall(`Team ${game.matchWinner + 1} wins the match!`);
+    } else {
+      SpadesAudio.say('Hand complete.');
+      showTableCall(`Hand complete  ${one} – ${two}`);
+    }
   }
 
   const becameMyTurn = game.currentSeat === mySeat && prev.currentSeat !== mySeat && !game.resolving;
@@ -454,10 +483,13 @@ function renderHand() {
     && roomState.game.phase === 'playing'
     && !roomState.game.resolving;
 
+  const isFreshDeal = roomState.game && cards.length === 13 && roomState.game.round !== lastDealtRound;
+  if (isFreshDeal) lastDealtRound = roomState.game.round;
+
   cards.forEach((card, index) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `card-btn ${isRedSuit(card.suit) ? 'red' : ''}`;
+    button.className = `card-btn ${isRedSuit(card.suit) ? 'red' : ''}${isFreshDeal ? ' card-dealt' : ''}`;
     button.disabled = !isMyTurn;
     button.innerHTML = cardMarkup(card);
     button.title = `${card.rank} of ${card.suit}`;
@@ -465,6 +497,7 @@ function renderHand() {
     const fanOffset = index - ((cards.length - 1) / 2);
     button.style.setProperty('--fan-angle', `${fanOffset * 3}deg`);
     button.style.setProperty('--fan-lift', `${Math.abs(fanOffset) * 1.2}px`);
+    if (isFreshDeal) button.style.setProperty('--deal-delay', `${index * 55}ms`);
     button.addEventListener('click', () => {
       if (!roomState || !roomState.game) return;
       if (roomState.game.phase !== 'playing' || roomState.game.resolving) return;
@@ -611,6 +644,9 @@ function render() {
   if (potValueEl) {
     potValueEl.textContent = `$${roomState.stake || 250}`;
   }
+  chipStacks.forEach((stack) => {
+    stack.classList.toggle('active-chip', Number(stack.querySelector('span').textContent) === Number(roomState.stake || 250));
+  });
 
   const playerCount = roomState.players.filter(Boolean).length;
   const matchOver = Boolean(roomState.game && roomState.game.matchOver);

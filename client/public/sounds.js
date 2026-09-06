@@ -174,6 +174,16 @@ const SpadesAudio = (() => {
     say('Spades are broken.');
   }
 
+  function matchWin(won) {
+    play((audio) => {
+      const notes = won ? [523, 659, 784, 1046] : [392, 349, 293, 246];
+      notes.forEach((freq, index) => {
+        tone(audio, { freq, duration: 0.26, type: 'triangle', gain: 0.26, delay: index * 0.14 });
+        tone(audio, { freq: freq * 1.5, duration: 0.2, type: 'sine', gain: 0.1, delay: index * 0.14 });
+      });
+    });
+  }
+
   function pickVoice() {
     if (!window.speechSynthesis) return null;
     const voices = window.speechSynthesis.getVoices();
@@ -207,7 +217,7 @@ const SpadesAudio = (() => {
     };
   }
 
-  return { unlock, setMuted, isMuted, ping, card, trump, chip, deal, turn, trickWon, spadesBroken, say, status };
+  return { unlock, setMuted, isMuted, ping, card, trump, chip, deal, turn, trickWon, spadesBroken, matchWin, say, status };
 })();
 
 window.SpadesAudio = SpadesAudio;
