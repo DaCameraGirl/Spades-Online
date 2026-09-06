@@ -1,9 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
+const auth = require('./auth');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -822,10 +824,67 @@ function resetRoom(room) {
   });
 }
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, '../client/public')));
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, rooms: rooms.size, version: 'trump-v4-hearts-boss' });
+});
+
+function bearerToken(req) {
+  const header = req.get('authorization') || '';
+  const match = /^Bearer (.+)$/.exec(header);
+  return match ? match[1] : null;
+}
+
+app.post('/api/signup', async (req, res) => {
+  try {
+    const { screenName, email, password, passwordConfirm } = req.body || {};
+    if (password !== passwordConfirm) {
+      return res.status(400).json({ error: 'password_mismatch', message: 'Passwords do not match.' });
+    }
+    const player = await auth.createPlayer({ screenName, email, password });
+    const token = await auth.createSession(player.id);
+    res.json({ token, player });
+  } catch (error) {
+    if (error instanceof auth.AuthError) {
+      return res.status(400).json({ error: error.code, message: error.message });
+    }
+    console.error('signup failed', error);
+    res.status(500).json({ error: 'server_error', message: 'Something went wrong creating your account.' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const player = await auth.authenticate({ email, password });
+    const token = await auth.createSession(player.id);
+    res.json({ token, player });
+  } catch (error) {
+    if (error instanceof auth.AuthError) {
+      return res.status(401).json({ error: error.code, message: error.message });
+    }
+    console.error('login failed', error);
+    res.status(500).json({ error: 'server_error', message: 'Something went wrong logging in.' });
+  }
+});
+
+app.post('/api/logout', async (req, res) => {
+  const token = bearerToken(req);
+  if (token) await auth.deleteSession(token);
+  res.json({ ok: true });
+});
+
+app.get('/api/me', async (req, res) => {
+  const player = await auth.getPlayerBySession(bearerToken(req));
+  if (!player) return res.status(401).json({ error: 'not_authenticated' });
+  res.json({ player });
+});
+
+app.get('/api/leaderboard', async (req, res) => {
+  const leaderboard = await auth.getLeaderboard(req.query.limit);
+  res.json({ leaderboard });
 });
 
 io.on('connection', (socket) => {
