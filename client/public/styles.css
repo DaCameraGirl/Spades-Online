@@ -331,6 +331,39 @@ body.game-active .topbar {
   text-align: center;
 }
 
+.room-peek-box {
+  width: min(820px, 94vw);
+  max-height: 84vh;
+  overflow-y: auto;
+}
+
+.room-peek-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.room-peek-grid {
+  flex: 1;
+  max-height: 60vh;
+}
+
+.room-peek-roster {
+  width: 200px;
+  flex: 0 0 200px;
+}
+
+@media (max-width: 760px) {
+  .room-peek-body {
+    flex-direction: column;
+  }
+
+  .room-peek-roster {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+}
+
 .sound-toggle[aria-pressed="false"] {
   color: var(--muted);
   opacity: 0.7;

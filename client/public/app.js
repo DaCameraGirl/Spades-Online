@@ -51,6 +51,12 @@ const lastTrickModal = document.getElementById('lastTrickModal');
 const lastTrickCloseBtn = document.getElementById('lastTrickCloseBtn');
 const lastTrickWinner = document.getElementById('lastTrickWinner');
 const lastTrickCards = document.getElementById('lastTrickCards');
+const roomPeekBtn = document.getElementById('roomPeekBtn');
+const roomPeekModal = document.getElementById('roomPeekModal');
+const roomPeekCloseBtn = document.getElementById('roomPeekCloseBtn');
+const roomPeekTitle = document.getElementById('roomPeekTitle');
+const roomPeekGrid = document.getElementById('roomPeekGrid');
+const roomPeekRoster = document.getElementById('roomPeekRoster');
 const tableChatLog = document.getElementById('tableChatLog');
 const tableChatInput = document.getElementById('tableChatInput');
 const tableChatSendBtn = document.getElementById('tableChatSendBtn');
@@ -604,8 +610,8 @@ function tileSeatMarkup(name, seatIndex, position, locked) {
   return `<button type="button" class="tile-seat ${position} tile-seat-open" title="Join this seat">+</button>`;
 }
 
-function renderTableGrid(tables) {
-  tableGrid.innerHTML = '';
+function renderTableGrid(tables, targetEl = tableGrid, interactive = true) {
+  targetEl.innerHTML = '';
   tables.forEach((table) => {
     const tile = document.createElement('div');
     tile.className = 'table-tile';
@@ -628,25 +634,27 @@ function renderTableGrid(tables) {
       <span class="table-tile-occupancy">${table.seatedCount}/4${table.spectatorCount ? ` &middot; ${table.spectatorCount} watching` : ''}</span>
     `;
 
-    if (!isLocked) {
+    if (interactive && !isLocked) {
       tile.querySelectorAll('.tile-seat-open').forEach((seatBtn) => {
         seatBtn.addEventListener('click', () => joinTable(table.tableNumber));
       });
       tile.querySelectorAll('.tile-seat-filled').forEach((seatBtn) => {
         seatBtn.addEventListener('click', () => joinTable(table.tableNumber, Number(seatBtn.dataset.watchSeat)));
       });
+    } else {
+      tile.querySelectorAll('button').forEach((btn) => { btn.disabled = true; });
     }
 
-    tableGrid.appendChild(tile);
+    targetEl.appendChild(tile);
   });
 }
 
-function renderRoster(roster) {
-  rosterList.innerHTML = '';
+function renderRoster(roster, targetEl = rosterList) {
+  targetEl.innerHTML = '';
   roster.forEach((name) => {
     const item = document.createElement('li');
     item.innerHTML = `<span class="rating-star rating-star-${currentLobbyRoomId}">&#9733;</span> 1500 &middot; ${escapeHtml(name)}`;
-    rosterList.appendChild(item);
+    targetEl.appendChild(item);
   });
 }
 
@@ -717,6 +725,7 @@ function render() {
   renderTableRosters();
   lockTableBtn.textContent = roomState.locked ? 'Unlock table' : 'Lock table';
   lastTrickBtn.disabled = !(roomState.game && roomState.game.lastTrick);
+  roomPeekBtn.classList.toggle('hidden', !currentLobbyRoomId);
   if (lastTrickBtn.disabled) lastTrickModal.classList.add('hidden');
   turnTimerSelect.disabled = !roomState.isHost;
   if (document.activeElement !== turnTimerSelect) {
@@ -817,10 +826,17 @@ socket.on('roomState', (payload) => {
   render();
 });
 
+let latestLobbyState = null;
+
 socket.on('lobbyState', (payload) => {
   if (payload.lobbyRoomId !== currentLobbyRoomId) return;
+  latestLobbyState = payload;
   renderTableGrid(payload.tables);
   renderRoster(payload.roster);
+  if (!roomPeekModal.classList.contains('hidden')) {
+    renderTableGrid(payload.tables, roomPeekGrid, false);
+    renderRoster(payload.roster, roomPeekRoster);
+  }
 });
 
 socket.on('tableChatHistory', (history) => {
@@ -1019,6 +1035,19 @@ lastTrickBtn.addEventListener('click', () => {
 
 lastTrickCloseBtn.addEventListener('click', () => {
   lastTrickModal.classList.add('hidden');
+});
+
+roomPeekBtn.addEventListener('click', () => {
+  roomPeekTitle.textContent = LOBBY_ROOM_LABELS[currentLobbyRoomId] || 'Room';
+  if (latestLobbyState) {
+    renderTableGrid(latestLobbyState.tables, roomPeekGrid, false);
+    renderRoster(latestLobbyState.roster, roomPeekRoster);
+  }
+  roomPeekModal.classList.remove('hidden');
+});
+
+roomPeekCloseBtn.addEventListener('click', () => {
+  roomPeekModal.classList.add('hidden');
 });
 
 leaveTableBtn.addEventListener('click', () => {
