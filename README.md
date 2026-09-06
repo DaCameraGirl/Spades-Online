@@ -7,7 +7,7 @@ A real-time, Pogo-style Spades lobby built for online play from different locati
 ## Features
 
 **Lobby**
-- Three rooms, Beginner / Advance / Expert, each with 25 permanent numbered tables
+- Three rooms, Beginner / Advanced / Expert, each with 25 permanent numbered tables
 - Live room roster and room chat, synced across everyone browsing that room
 - Click an open seat to join, click a filled seat to watch that specific player
 - Table tiles show real-time occupancy and update the moment anyone sits, leaves, or starts a hand

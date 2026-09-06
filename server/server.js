@@ -37,7 +37,7 @@ const rooms = new Map();
 
 const LOBBY_ROOMS = [
   { id: 'beginner', label: 'Beginner Room', ratingLabel: '1500-1599' },
-  { id: 'advance', label: 'Advance Room', ratingLabel: '1600-1650' },
+  { id: 'advance', label: 'Advanced Room', ratingLabel: '1600-1650' },
   { id: 'expert', label: 'Expert Room', ratingLabel: '1651+' },
 ];
 const TABLES_PER_LOBBY = 25;
@@ -104,6 +104,30 @@ function lobbyTableSummary(lobbyRoomId) {
 function lobbyRosterList(lobbyRoomId) {
   const members = lobbyMembers.get(lobbyRoomId);
   return members ? [...members.values()] : [];
+}
+
+// A lightweight, one-shot snapshot across all three rooms at once, for the
+// opening lobby screen (before a player has picked a room to browse tables
+// in). Unlike broadcastLobby this is never pushed, it is only computed on
+// request, since the opening screen doesn't need a live-subscribed channel
+// for three numbers per room.
+function lobbyOverview() {
+  return LOBBY_ROOMS.map((lobbyRoom) => {
+    const tables = lobbyTableSummary(lobbyRoom.id);
+    const seated = tables.reduce((sum, table) => sum + table.seatedCount, 0);
+    const openTables = tables.filter((table) => table.seatedCount < 4 && !table.locked).length;
+    const inPlay = tables.filter((table) => table.inProgress).length;
+    return {
+      id: lobbyRoom.id,
+      label: lobbyRoom.label,
+      ratingLabel: lobbyRoom.ratingLabel,
+      online: (lobbyMembers.get(lobbyRoom.id) || new Map()).size,
+      seated,
+      openTables,
+      totalTables: tables.length,
+      inPlay,
+    };
+  });
 }
 
 function broadcastLobby(lobbyRoomId) {
@@ -399,17 +423,16 @@ function armTurnTimer(room) {
     const current = room.players[seatIndex];
     if (!current || current.isBot) return;
 
+    // A slow turn auto-plays once via the same bot logic, the seat and
+    // session stay with the player (temporary AFK), it is never a
+    // permanent demotion to spectator. continueTurn re-arms this timer
+    // for their next turn, so repeated inactivity keeps auto-playing.
     const timedOutSocket = io.sockets.sockets.get(current.socketId);
-    const result = vacateSeat(room, seatIndex);
     if (timedOutSocket) {
-      addSpectator(room, timedOutSocket.id, current.name);
-      timedOutSocket.emit('errorMessage', 'You timed out and were moved to spectating.');
+      timedOutSocket.emit('errorMessage', 'You timed out, your seat auto-played that turn.');
     }
     persistRooms();
-    if (!result.deleted) {
-      broadcastRoom(room);
-      if (result.gameInProgress) continueTurn(room);
-    }
+    handleBotTurn(room, { forceSeat: seatIndex });
   }, room.turnTimerSeconds * 1000);
 }
 
@@ -562,11 +585,13 @@ function resolveCompletedTrick(room) {
   }, TRICK_PAUSE_MS);
 }
 
-function handleBotTurn(room) {
+function handleBotTurn(room, { forceSeat = null } = {}) {
   if (!room || !room.game || room.game.resolving) return false;
 
   const current = room.players[room.game.currentSeat];
-  if (!isBotPlayer(current)) return false;
+  if (!current) return false;
+  const forcing = forceSeat === room.game.currentSeat;
+  if (!isBotPlayer(current) && !forcing) return false;
 
   if (room.game.phase === 'bidding') {
     const bid = pickBotBid(current.hand, room.rankMode);
@@ -800,7 +825,7 @@ function resetRoom(room) {
 app.use(express.static(path.join(__dirname, '../client/public')));
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, rooms: rooms.size, version: 'trump-v3-deuces-wild' });
+  res.json({ ok: true, rooms: rooms.size, version: 'trump-v4-hearts-boss' });
 });
 
 io.on('connection', (socket) => {
@@ -812,6 +837,10 @@ io.on('connection', (socket) => {
   } else if (restored && restored.player.connected) {
     socket.emit('errorMessage', 'That session is already connected.');
   }
+
+  socket.on('getLobbyOverview', () => {
+    socket.emit('lobbyOverview', lobbyOverview());
+  });
 
   socket.on('joinLobby', ({ lobbyRoomId, name }) => {
     const lobbyRoom = LOBBY_ROOMS.find((entry) => entry.id === lobbyRoomId);
@@ -943,6 +972,47 @@ io.on('connection', (socket) => {
       watcherSocket.emit('errorMessage', 'The player you were watching removed you from the table.');
     }
     broadcastRoom(room);
+  });
+
+  socket.on('claimSeat', ({ roomCode, seat }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+
+    const seatIndex = Number(seat);
+    if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex > 3) return;
+
+    const spectator = (room.spectators || []).find((entry) => entry.socketId === socket.id);
+    if (!spectator) {
+      socket.emit('errorMessage', 'You need to be watching this table to claim a seat.');
+      return;
+    }
+
+    const target = room.players[seatIndex];
+    if (target && !target.isBot) {
+      socket.emit('errorMessage', 'That seat is already taken.');
+      return;
+    }
+
+    removeSpectatorBySocket(room, socket.id);
+    room.players[seatIndex] = {
+      id: `${seatIndex}-${Date.now()}`,
+      sessionToken,
+      socketId: socket.id,
+      name: spectator.name,
+      seat: seatIndex,
+      hand: target ? target.hand : [],
+      bid: target ? target.bid : null,
+      connected: true,
+      ready: false,
+      isBot: false,
+    };
+    if (room.kickVotes) room.kickVotes.delete(seatIndex);
+
+    socket.join(room.code);
+    socket.data.roomCode = room.code;
+    persistRooms();
+    broadcastRoom(room);
+    if (room.game && room.status === 'playing' && !room.game.resolving) continueTurn(room);
   });
 
   socket.on('leaveTable', ({ roomCode }) => {

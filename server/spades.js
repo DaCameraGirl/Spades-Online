@@ -1,4 +1,8 @@
 const SUITS = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
+// House rule: among the four boss deuces in 2s-high mode, hearts outranks
+// spades. This is independent of SUITS, which still governs normal suit
+// grouping/display order everywhere else.
+const DEUCE_ORDER = ['Hearts', 'Spades', 'Clubs', 'Diamonds'];
 const RANK_VALUES = {
   '2': 2,
   '3': 3,
@@ -55,7 +59,7 @@ function rankValue(card, mode = 'ace') {
 function trumpPower(card, mode = 'ace') {
   if (!isTrump(card, mode)) return 0;
   if (isDeuces(mode) && isDeuce(card)) {
-    return 200 - SUITS.indexOf(card.suit);
+    return 200 - DEUCE_ORDER.indexOf(card.suit);
   }
   return rankValue(card, mode);
 }
@@ -79,14 +83,14 @@ function sortByTrumpAndSuit(hand, mode) {
 }
 
 // In 2s-high mode the deuces are shown as their own top-of-hand group
-// (spade 2 first, then hearts/clubs/diamonds), ahead of the aces, since
+// (heart 2 first, then spades/clubs/diamonds), ahead of the aces, since
 // that's the whole point of the house rule — the rest of the hand sorts
 // normally behind them.
 function sortHand(hand, mode = 'ace') {
   if (!isDeuces(mode)) return sortByTrumpAndSuit(hand, mode);
 
   const twos = hand.filter((card) => card.rank === '2')
-    .sort((a, b) => SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit));
+    .sort((a, b) => DEUCE_ORDER.indexOf(a.suit) - DEUCE_ORDER.indexOf(b.suit));
   const rest = hand.filter((card) => card.rank !== '2');
   return [...twos, ...sortByTrumpAndSuit(rest, mode)];
 }
@@ -144,9 +148,14 @@ function determineWinner(trickCards, leadSuit, mode = 'ace') {
 }
 
 
-function scoreContract(contractBid, tricksWon) {
+// House rule: a player who individually bid 10 and whose team makes its
+// contract scores 200 for the contract instead of the usual bid*10, on
+// top of the normal per-overtrick bonus. A failed contract still costs
+// the normal bid*10, the bonus only applies to a made contract.
+function scoreContract(contractBid, tricksWon, hasTenBid = false) {
   if (tricksWon >= contractBid) {
-    return contractBid * 10 + (tricksWon - contractBid);
+    const base = hasTenBid ? 200 : contractBid * 10;
+    return base + (tricksWon - contractBid);
   }
   return -contractBid * 10;
 }
@@ -169,7 +178,8 @@ function scoreTeamSeats(seats, bids, tricksBySeat) {
     if (bids[seat] !== 0) return sum;
     return sum + ((tricksBySeat[seat] || 0) === 0 ? 100 : -100);
   }, 0);
-  return scoreContract(contractBid, tricksWon) + nilScore;
+  const hasTenBid = seats.some((seat) => bids[seat] === 10);
+  return scoreContract(contractBid, tricksWon, hasTenBid) + nilScore;
 }
 function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0, mode = 'ace', bids = {}) {
   if (!hand.length) return null;

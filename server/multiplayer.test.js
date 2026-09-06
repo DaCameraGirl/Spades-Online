@@ -710,7 +710,7 @@ test('voteKick: you cannot vote to kick yourself', async (t) => {
   assert.equal(await selfError, 'You cannot vote to kick yourself.');
 });
 
-test('turn timer: a player who lets their turn expire is benched to a spectator and a bot takes over', async (t) => {
+test('turn timer: a player who lets their turn expire has that turn auto-played, but keeps their seat', async (t) => {
   const tokens = ['timer-1', 'timer-2', 'timer-3', 'timer-4'];
   const sockets = [];
   const states = [];
@@ -730,10 +730,89 @@ test('turn timer: a player who lets their turn expire is benched to a spectator 
   const timedOutSeat = started.game.currentSeat;
   const timedOutError = waitFor(sockets[timedOutSeat], 'errorMessage');
 
-  const updated = await waitState(states[0], (state) => state.players[timedOutSeat].isBot === true, 3000, 'bench after timeout');
-  assert.equal(updated.players[timedOutSeat].connected, true, 'a bot takes over the abandoned seat');
-  assert.equal(await timedOutError, 'You timed out and were moved to spectating.');
-  await waitState(states[timedOutSeat], (state) => state.isSpectator === true, 3000, 'the timed-out player becomes a spectator at their own table');
+  const updated = await waitState(states[0], (state) => state.players[timedOutSeat].bid !== null, 3000, 'auto-play after timeout');
+  assert.equal(updated.players[timedOutSeat].isBot, false, 'the seat stays with the human, this is never a permanent demotion');
+  assert.equal(updated.players[timedOutSeat].connected, true, 'the player keeps their seat');
+  assert.equal(await timedOutError, 'You timed out, your seat auto-played that turn.');
+  assert.equal(states[timedOutSeat]().isSpectator, false, 'the timed-out player is never converted to a spectator');
+});
+
+test('claimSeat: a spectator can take over a bot-occupied seat without leaving or rejoining', async (t) => {
+  const tokens = ['claim-1', 'claim-2', 'claim-3', 'claim-4'];
+  const sockets = [];
+  const states = [];
+  const tableNumber = 16;
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  const started = await waitState(states[0], (state) => state.game && state.game.phase === 'bidding');
+  const roomCode = started.roomCode;
+
+  sockets[2].emit('leaveTable', { roomCode });
+  await waitState(states[0], (state) => state.players[2].isBot === true, 3000, 'left seat becomes a bot so the hand continues');
+
+  const spectator = await connect(sharedPort, 'claim-spectator');
+  const spectatorState = createState(spectator);
+  t.after(() => closeSocket(spectator));
+  spectator.emit('joinTable', { lobbyRoomId: 'expert', tableNumber, name: 'Claimant' });
+  await waitState(spectatorState, (state) => state.isSpectator === true, 3000, 'table looks full, the new arrival spectates');
+
+  spectator.emit('claimSeat', { roomCode, seat: 2 });
+  const seated = await waitState(spectatorState, (state) => !state.isSpectator, 3000, 'spectator becomes seated');
+  const me = seated.players.find((player) => player.isYou);
+  assert.equal(me.seat, 2);
+  assert.equal(me.isBot, false);
+  assert.equal(me.name, 'Claimant');
+
+  await waitState(states[0], (state) => state.players[2].isBot === false && state.players[2].name === 'Claimant', 3000, 'other players see the reseated human');
+});
+
+test('claimSeat: two spectators racing the same seat, only one wins and the loser is told why', async (t) => {
+  const tokens = ['race-1', 'race-2', 'race-3', 'race-4'];
+  const sockets = [];
+  const states = [];
+  const tableNumber = 17;
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  const started = await waitState(states[0], (state) => state.game && state.game.phase === 'bidding');
+  const roomCode = started.roomCode;
+
+  sockets[1].emit('leaveTable', { roomCode });
+  await waitState(states[0], (state) => state.players[1].isBot === true, 3000, 'left seat becomes a bot');
+
+  const specA = await connect(sharedPort, 'race-spec-a');
+  const specB = await connect(sharedPort, 'race-spec-b');
+  t.after(() => [specA, specB].forEach(closeSocket));
+  const stateA = createState(specA);
+  const stateB = createState(specB);
+  const errorsA = [];
+  const errorsB = [];
+  specA.on('errorMessage', (message) => errorsA.push(message));
+  specB.on('errorMessage', (message) => errorsB.push(message));
+  specA.emit('joinTable', { lobbyRoomId: 'expert', tableNumber, name: 'RaceA' });
+  specB.emit('joinTable', { lobbyRoomId: 'expert', tableNumber, name: 'RaceB' });
+  await waitState(stateA, (state) => state.isSpectator === true, 3000);
+  await waitState(stateB, (state) => state.isSpectator === true, 3000);
+
+  specA.emit('claimSeat', { roomCode, seat: 1 });
+  specB.emit('claimSeat', { roomCode, seat: 1 });
+
+  await new Promise((resolve) => { setTimeout(resolve, 300); });
+
+  const aSeated = !stateA().isSpectator;
+  const bSeated = !stateB().isSpectator;
+  assert.notEqual(aSeated, bSeated, 'exactly one of the two racing spectators gets seated, never both, never neither');
+  const loserErrors = aSeated ? errorsB : errorsA;
+  assert.ok(loserErrors.includes('That seat is already taken.'), 'the loser is told the seat was already taken');
 });
 
 test('watchSeat: a spectator can attach to a specific player, visible in that player\'s watcher list', async (t) => {
