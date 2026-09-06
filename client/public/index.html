@@ -34,62 +34,85 @@
             <div class="hero-card hc-3 hc-red"><span class="hc-corner">A<br>&diams;</span><span class="hc-center">&diams;</span><span class="hc-corner hc-corner-bottom">A<br>&diams;</span></div>
             <div class="hero-card hc-4"><span class="hc-corner">Q<br>&clubs;</span><span class="hc-center">&clubs;</span><span class="hc-corner hc-corner-bottom">Q<br>&clubs;</span></div>
           </div>
-          <h2>Choose a room</h2>
 
-          <div class="auth-row">
-            <label>
-              Your name
-              <input id="lobbyPlayerName" type="text" value="Player 1" maxlength="20" />
+          <div class="lobby-identity-row">
+            <label class="lobby-identity">
+              <span class="lobby-avatar" aria-hidden="true">&spades;</span>
+              <span class="lobby-identity-copy">
+                <span class="lobby-identity-label">Playing as</span>
+                <input id="lobbyPlayerName" type="text" value="Player 1" maxlength="20" />
+              </span>
             </label>
-          </div>
-
-          <div class="room-card-grid">
-            <button type="button" class="room-card" data-lobby-room="beginner">
-              <span class="room-card-suit" aria-hidden="true">&spades;</span>
-              <span class="room-card-name">Beginner Room</span>
-              <span class="room-card-divider"></span>
-              <span class="room-card-rating">Rated 1500&ndash;1599</span>
-            </button>
-            <button type="button" class="room-card" data-lobby-room="advance">
-              <span class="room-card-suit" aria-hidden="true">&spades;</span>
-              <span class="room-card-name">Advance Room</span>
-              <span class="room-card-divider"></span>
-              <span class="room-card-rating">Rated 1600&ndash;1650</span>
-            </button>
-            <button type="button" class="room-card" data-lobby-room="expert">
-              <span class="room-card-suit" aria-hidden="true">&spades;</span>
-              <span class="room-card-name">Expert Room</span>
-              <span class="room-card-divider"></span>
-              <span class="room-card-rating">Rated 1651+</span>
+            <button id="quickJoinBtn" type="button" class="primary quick-join-btn">
+              <span aria-hidden="true">&spades;</span> Quick Join
             </button>
           </div>
 
-          <button id="showPrivateTableBtn" type="button" class="secondary private-table-link">Private table (have a code?)</button>
+          <div class="lobby-main">
+            <h2>Choose your table</h2>
+            <p id="lobbyActivityLine" class="lobby-activity-line">Checking the floor&hellip;</p>
+
+            <div class="room-card-grid">
+              <button type="button" class="room-card room-card-beginner" data-lobby-room="beginner">
+                <span class="room-card-suit" aria-hidden="true">&clubs;</span>
+                <span class="room-card-name">Beginner Room</span>
+                <span class="room-card-tagline">Casual games, relaxed pace</span>
+                <span class="room-card-divider"></span>
+                <span class="room-card-rating">Rated 1500&ndash;1599</span>
+                <span class="room-card-occupancy" data-overview="beginner">Checking tables&hellip;</span>
+              </button>
+              <button type="button" class="room-card room-card-advance" data-lobby-room="advance">
+                <span class="room-card-suit" aria-hidden="true">&hearts;</span>
+                <span class="room-card-name">Advanced Room</span>
+                <span class="room-card-tagline">Balanced competition</span>
+                <span class="room-card-divider"></span>
+                <span class="room-card-rating">Rated 1600&ndash;1650</span>
+                <span class="room-card-occupancy" data-overview="advance">Checking tables&hellip;</span>
+              </button>
+              <button type="button" class="room-card room-card-expert" data-lobby-room="expert">
+                <span class="room-card-suit" aria-hidden="true">&spades;</span>
+                <span class="room-card-name">Expert Room</span>
+                <span class="room-card-tagline">High stakes, sharp play</span>
+                <span class="room-card-divider"></span>
+                <span class="room-card-rating">Rated 1651+</span>
+                <span class="room-card-occupancy" data-overview="expert">Checking tables&hellip;</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="lobby-footer-row">
+            <button id="showPrivateTableBtn" type="button" class="secondary private-table-link">Private table (have a code?)</button>
+            <p class="lobby-footer-note">Ratings shown are cosmetic for now, real accounts are coming.</p>
+          </div>
 
           <div id="lobbyErrorBox" class="error-box hidden"></div>
         </section>
 
-        <section id="roomView" class="panel">
-          <div class="room-view-header">
-            <button id="backToRoomsBtn" type="button" class="secondary">&larr; Rooms</button>
-            <h2 id="roomViewTitle">Beginner Room</h2>
-          </div>
-
-          <div id="tableGrid" class="table-grid" aria-label="Tables"></div>
-
-          <div class="room-social">
-            <div class="room-roster">
-              <p class="eyebrow">Players in this room</p>
-              <ul id="rosterList" class="roster-list"></ul>
+        <section id="roomView" class="panel roomview-shell">
+          <div class="roomview-sidebar">
+            <div class="room-view-header">
+              <button id="backToRoomsBtn" type="button" class="secondary">&larr; Rooms</button>
+              <div class="room-view-heading">
+                <h2 id="roomViewTitle">Beginner Room</h2>
+                <p id="roomViewSummary" class="roomview-summary">&nbsp;</p>
+              </div>
             </div>
-            <div class="room-chat">
+            <div class="table-sidebar-section">
+              <p class="eyebrow">Players in this room</p>
+              <ul id="rosterList" class="roster-list table-roster-list"></ul>
+            </div>
+            <div class="table-sidebar-chat">
               <p class="eyebrow">Room chat</p>
-              <div id="chatLog" class="chat-log"></div>
-              <div class="chat-input-row">
+              <div id="chatLog" class="chat-log table-chat-log"></div>
+              <div class="chat-input-row table-chat-input-row">
                 <input id="chatInput" type="text" maxlength="200" placeholder="Say something..." />
                 <button id="chatSendBtn" type="button" class="secondary">Send</button>
               </div>
             </div>
+          </div>
+
+          <div class="roomview-floor">
+            <div id="tableGrid" class="table-grid" aria-label="Tables"></div>
           </div>
         </section>
 

@@ -20,10 +20,13 @@ const lobbySection = document.getElementById('lobby');
 const tableSection = document.getElementById('table');
 const lobbyPlayerNameInput = document.getElementById('lobbyPlayerName');
 const roomCards = [...document.querySelectorAll('[data-lobby-room]')];
+const quickJoinBtn = document.getElementById('quickJoinBtn');
+const lobbyActivityLine = document.getElementById('lobbyActivityLine');
 const showPrivateTableBtn = document.getElementById('showPrivateTableBtn');
 const backToRoomsBtn = document.getElementById('backToRoomsBtn');
 const backToRoomsFromPrivateBtn = document.getElementById('backToRoomsFromPrivateBtn');
 const roomViewTitle = document.getElementById('roomViewTitle');
+const roomViewSummary = document.getElementById('roomViewSummary');
 const tableGrid = document.getElementById('tableGrid');
 const rosterList = document.getElementById('rosterList');
 const chatLog = document.getElementById('chatLog');
@@ -99,10 +102,11 @@ let lastAudio = null;
 let callTimer = null;
 let currentLobbyRoomId = null;
 let lastDealtRound = null;
+let quickJoinPending = false;
 
 const LOBBY_ROOM_LABELS = {
   beginner: 'Beginner Room',
-  advance: 'Advance Room',
+  advance: 'Advanced Room',
   expert: 'Expert Room',
 };
 
@@ -282,11 +286,20 @@ function activatePanel(section) {
     panel.classList.toggle('active', panel === section);
   });
   document.body.classList.toggle('game-active', section === tableSection);
+  document.body.classList.toggle('room-browsing', section === roomViewSection);
+  document.body.classList.toggle('room-select-active', section === roomSelectSection);
 }
 
 function showRoomSelect() {
   activatePanel(roomSelectSection);
+  refreshLobbyOverview();
 }
+
+// The opening screen is marked active directly in the HTML so it renders
+// before any script runs, but that means activatePanel() never ran for it,
+// so the body never picked up the layout class that keeps it full-height.
+// Sync body state to whichever panel the static markup already shows.
+activatePanel(roomSelectSection);
 
 function showRoomView() {
   activatePanel(roomViewSection);
@@ -439,6 +452,7 @@ function renderSeats() {
 
     if (!player) {
       seatCard.classList.add('empty');
+      const canSit = Boolean(roomState.isSpectator);
       seatCard.innerHTML = `
         <div class="seat-medallion empty-medallion" aria-hidden="true">${seatIndex + 1}</div>
         <div class="seat-copy">
@@ -446,7 +460,13 @@ function renderSeats() {
           <div class="seat-stats"><span>Waiting</span></div>
         </div>
         <span class="seat-badge">Open</span>
+        ${canSit ? '<button type="button" class="sit-here-btn">Sit Here</button>' : ''}
       `;
+      if (canSit) {
+        seatCard.querySelector('.sit-here-btn').addEventListener('click', () => {
+          socket.emit('claimSeat', { roomCode: roomState.roomCode, seat: seatIndex });
+        });
+      }
       tableSeats.appendChild(seatCard);
       return;
     }
@@ -476,6 +496,7 @@ function renderSeats() {
     const safeName = escapeHtml(player.name);
     const initials = player.isBot ? 'AI' : escapeHtml(playerInitials(player.name));
     const canVoteKick = mySeat != null && !player.isYou && !player.isBot;
+    const canSitHere = Boolean(roomState.isSpectator) && player.isBot;
     const votes = player.votesAgainst || 0;
     const watchers = player.isYou ? (player.watchers || []) : [];
 
@@ -490,6 +511,7 @@ function renderSeats() {
       </div>
       <span class="seat-badge">${badge}</span>
       ${canVoteKick ? `<button type="button" class="vote-kick-btn" title="Vote to kick">Vote kick${votes ? ` (${votes}/2)` : ''}</button>` : ''}
+      ${canSitHere ? '<button type="button" class="sit-here-btn">Sit Here</button>' : ''}
       ${watchers.length ? `<div class="watcher-list">${watchers.map((watcherEntry) => `
         <span class="watcher-chip">${escapeHtml(watcherEntry.name)}<button type="button" class="watcher-boot-btn" data-watcher-id="${watcherEntry.id}" title="Remove watcher">&times;</button></span>
       `).join('')}</div>` : ''}
@@ -498,6 +520,12 @@ function renderSeats() {
     if (canVoteKick) {
       seatCard.querySelector('.vote-kick-btn').addEventListener('click', () => {
         socket.emit('voteKick', { roomCode: roomState.roomCode, targetSeat: seatIndex });
+      });
+    }
+
+    if (canSitHere) {
+      seatCard.querySelector('.sit-here-btn').addEventListener('click', () => {
+        socket.emit('claimSeat', { roomCode: roomState.roomCode, seat: seatIndex });
       });
     }
 
@@ -816,6 +844,7 @@ socket.on('connect', () => {
   markConnected();
   setError('');
   maybeAutoJoin();
+  refreshLobbyOverview();
 });
 
 socket.on('roomState', (payload) => {
@@ -833,11 +862,44 @@ socket.on('lobbyState', (payload) => {
   latestLobbyState = payload;
   renderTableGrid(payload.tables);
   renderRoster(payload.roster);
+  if (roomViewSummary) {
+    const seated = payload.tables.reduce((sum, table) => sum + table.seatedCount, 0);
+    const openTables = payload.tables.filter((table) => table.seatedCount < 4 && !table.locked).length;
+    roomViewSummary.textContent = `${seated} playing now · ${openTables} open tables`;
+  }
   if (!roomPeekModal.classList.contains('hidden')) {
     renderTableGrid(payload.tables, roomPeekGrid, false);
     renderRoster(payload.roster, roomPeekRoster);
   }
+  if (quickJoinPending) {
+    quickJoinPending = false;
+    const target = payload.tables.find((table) => table.seatedCount < 4 && !table.locked);
+    if (target) {
+      joinTable(target.tableNumber);
+    } else {
+      setLobbyError('Every table is full right now, pick a room to browse and watch instead.');
+    }
+  }
 });
+
+socket.on('lobbyOverview', (rooms) => {
+  rooms.forEach((room) => {
+    const el = document.querySelector(`[data-overview="${room.id}"]`);
+    if (!el) return;
+    el.textContent = `${room.online} online · ${room.openTables}/${room.totalTables} tables open`;
+  });
+  if (lobbyActivityLine) {
+    const online = rooms.reduce((sum, room) => sum + room.online, 0);
+    const inPlay = rooms.reduce((sum, room) => sum + room.inPlay, 0);
+    lobbyActivityLine.textContent = online > 0
+      ? `${online} players online right now · ${inPlay} hands in play`
+      : 'Tables are quiet right now, be the first to sit down';
+  }
+});
+
+function refreshLobbyOverview() {
+  socket.emit('getLobbyOverview');
+}
 
 socket.on('tableChatHistory', (history) => {
   tableChatLog.innerHTML = '';
@@ -881,6 +943,21 @@ roomCards.forEach((card) => {
     socket.emit('joinLobby', { lobbyRoomId, name });
     showRoomView();
   });
+});
+
+quickJoinBtn.addEventListener('click', () => {
+  if (window.SpadesAudio) SpadesAudio.unlock();
+  const name = lobbyPlayerNameInput.value.trim() || 'Player';
+  currentLobbyRoomId = 'beginner';
+  quickJoinPending = true;
+  roomViewTitle.textContent = LOBBY_ROOM_LABELS.beginner;
+  if (roomViewSummary) roomViewSummary.textContent = 'Finding you a table…';
+  tableGrid.innerHTML = '';
+  rosterList.innerHTML = '';
+  chatLog.innerHTML = '';
+  setLobbyError('');
+  socket.emit('joinLobby', { lobbyRoomId: 'beginner', name });
+  showRoomView();
 });
 
 backToRoomsBtn.addEventListener('click', () => {
