@@ -49,6 +49,10 @@ const chatLog = document.getElementById('chatLog');
 const chatInput = document.getElementById('chatInput');
 const chatSendBtn = document.getElementById('chatSendBtn');
 const lobbyErrorBox = document.getElementById('lobbyErrorBox');
+const showLeaderboardBtn = document.getElementById('showLeaderboardBtn');
+const leaderboardModal = document.getElementById('leaderboardModal');
+const leaderboardCloseBtn = document.getElementById('leaderboardCloseBtn');
+const leaderboardList = document.getElementById('leaderboardList');
 const statusBadge = document.getElementById('statusBadge');
 const accountChip = document.getElementById('accountChip');
 const accountScreenName = document.getElementById('accountScreenName');
@@ -272,7 +276,7 @@ function maybeAutoJoin() {
   if (!pendingRoomCode) return;
   didAutoJoin = true;
   const name = playerNameInput.value.trim() || 'Player';
-  socket.emit('joinRoom', { code: pendingRoomCode, name });
+  socket.emit('joinRoom', { code: pendingRoomCode, name, accountToken });
 }
 
 function applyTableTheme(theme = tableStyleSelect.value) {
@@ -773,7 +777,7 @@ function renderScores() {
 function joinTable(tableNumber, watchSeat) {
   if (window.SpadesAudio) SpadesAudio.unlock();
   const name = lobbyPlayerNameInput.value.trim() || 'Player';
-  const payload = { lobbyRoomId: currentLobbyRoomId, tableNumber, name };
+  const payload = { lobbyRoomId: currentLobbyRoomId, tableNumber, name, accountToken };
   if (typeof watchSeat === 'number') payload.watchSeat = watchSeat;
   socket.emit('joinTable', payload);
 }
@@ -1125,6 +1129,40 @@ showPrivateTableBtn.addEventListener('click', () => {
   showPrivateTablePanel();
 });
 
+function renderLeaderboard(entries) {
+  leaderboardList.innerHTML = '';
+  if (!entries.length) {
+    leaderboardList.innerHTML = '<li class="leaderboard-empty">No rated matches played yet, be the first.</li>';
+    return;
+  }
+  entries.forEach((entry, index) => {
+    const row = document.createElement('li');
+    row.className = 'leaderboard-row';
+    row.innerHTML = `
+      <span class="leaderboard-rank">${index + 1}</span>
+      <span class="leaderboard-name">${escapeHtml(entry.screenName)}</span>
+      <span class="leaderboard-rating">${entry.eloRating}</span>
+    `;
+    leaderboardList.appendChild(row);
+  });
+}
+
+showLeaderboardBtn.addEventListener('click', async () => {
+  leaderboardModal.classList.remove('hidden');
+  leaderboardList.innerHTML = '<li class="leaderboard-empty">Loading&hellip;</li>';
+  try {
+    const res = await fetch('/api/leaderboard?limit=25');
+    const json = await res.json();
+    renderLeaderboard(json.leaderboard || []);
+  } catch {
+    leaderboardList.innerHTML = '<li class="leaderboard-empty">Could not load the leaderboard.</li>';
+  }
+});
+
+leaderboardCloseBtn.addEventListener('click', () => {
+  leaderboardModal.classList.add('hidden');
+});
+
 chatSendBtn.addEventListener('click', sendChatMessage);
 chatInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') sendChatMessage();
@@ -1135,7 +1173,7 @@ createRoomBtn.addEventListener('click', () => {
   const name = playerNameInput.value.trim() || 'Host';
   const stake = Number(stakeSelect.value);
   const rankMode = createRankModeSelect.value;
-  socket.emit('createRoom', { name, stake, rankMode, sessionToken });
+  socket.emit('createRoom', { name, stake, rankMode, sessionToken, accountToken });
   setError('');
 });
 
@@ -1152,7 +1190,7 @@ joinRoomBtn.addEventListener('click', () => {
     return;
   }
 
-  socket.emit('joinRoom', { code: roomCode, name, sessionToken });
+  socket.emit('joinRoom', { code: roomCode, name, sessionToken, accountToken });
   setError('');
 });
 

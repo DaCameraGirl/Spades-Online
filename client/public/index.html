@@ -127,10 +127,21 @@
 
           <div class="lobby-footer-row">
             <button id="showPrivateTableBtn" type="button" class="secondary private-table-link">Private table (have a code?)</button>
-            <p class="lobby-footer-note">Ratings shown are cosmetic for now, real accounts are coming.</p>
+            <button id="showLeaderboardBtn" type="button" class="secondary private-table-link">Leaderboard</button>
+            <p class="lobby-footer-note">Room rating ranges above are cosmetic, your real Elo is shown in the leaderboard.</p>
           </div>
 
           <div id="lobbyErrorBox" class="error-box hidden"></div>
+
+          <div id="leaderboardModal" class="last-trick-modal hidden">
+            <div class="last-trick-card-box">
+              <div class="last-trick-header">
+                <span>Leaderboard</span>
+                <button id="leaderboardCloseBtn" type="button" class="table-chat-close">&times;</button>
+              </div>
+              <ol id="leaderboardList" class="leaderboard-list"></ol>
+            </div>
+          </div>
         </section>
 
         <section id="roomView" class="panel roomview-shell">

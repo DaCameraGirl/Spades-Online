@@ -591,6 +591,53 @@ body.room-browsing .content {
   font-size: 11px;
 }
 
+.leaderboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.leaderboard-rank {
+  width: 26px;
+  flex: 0 0 26px;
+  text-align: center;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.leaderboard-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.leaderboard-rating {
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.leaderboard-empty {
+  padding: 12px 4px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 #roomView.panel.active.roomview-shell {
   flex: 1;
   min-height: 0;
