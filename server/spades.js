@@ -31,25 +31,32 @@ function isDeuces(mode) {
   return mode === 'deuces';
 }
 
-function isTrump(card, mode = 'ace') {
-  if (!card) return false;
-  return card.suit === 'Spades';
+function isDeuce(card) {
+  return Boolean(card) && card.rank === '2';
 }
 
+// In 2s-high (deuces wild) mode, all four deuces leave their printed suit
+// and become trump themselves, ranked above every other card including the
+// ace of spades. Ranked highest to lowest: 2S, 2H, 2C, 2D.
 function effectiveSuit(card, mode = 'ace') {
+  if (isDeuces(mode) && isDeuce(card)) return 'Spades';
   return card.suit;
 }
 
-// In 2s-high (deuces) mode, the 2 outranks the ace within its own suit —
-// spades stays the only trump suit, a 2 of hearts/clubs/diamonds just
-// becomes that suit's top card, it never trumps another suit.
+function isTrump(card, mode = 'ace') {
+  if (!card) return false;
+  return effectiveSuit(card, mode) === 'Spades';
+}
+
 function rankValue(card, mode = 'ace') {
-  if (isDeuces(mode) && card.rank === '2') return 15;
   return RANK_VALUES[card.rank];
 }
 
 function trumpPower(card, mode = 'ace') {
   if (!isTrump(card, mode)) return 0;
+  if (isDeuces(mode) && isDeuce(card)) {
+    return 200 - SUITS.indexOf(card.suit);
+  }
   return rankValue(card, mode);
 }
 

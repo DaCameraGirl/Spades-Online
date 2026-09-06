@@ -492,9 +492,9 @@ function cardsRemaining(room) {
   return room.players.reduce((sum, seatedPlayer) => sum + (seatedPlayer && seatedPlayer.hand ? seatedPlayer.hand.length : 0), 0);
 }
 
-function pickBotBid(hand) {
-  const spades = hand.filter((card) => card.suit === 'Spades').length;
-  const nonSpades = hand.filter((card) => card.suit !== 'Spades').length;
+function pickBotBid(hand, mode = 'ace') {
+  const spades = hand.filter((card) => isTrump(card, mode)).length;
+  const nonSpades = hand.length - spades;
 
   if (spades >= 4 && nonSpades <= 5) return Math.min(7, spades);
   if (spades >= 3) return Math.min(5, spades);
@@ -569,7 +569,7 @@ function handleBotTurn(room) {
   if (!isBotPlayer(current)) return false;
 
   if (room.game.phase === 'bidding') {
-    const bid = pickBotBid(current.hand);
+    const bid = pickBotBid(current.hand, room.rankMode);
     current.bid = bid;
     room.game.bids[current.seat] = bid;
 
@@ -617,8 +617,8 @@ function handleBotTurn(room) {
     current.hand.splice(cardIndex, 1);
 
     room.game.trick.push({ seat: current.seat, card });
-    if (!room.game.leadSuit) room.game.leadSuit = card.suit;
-    if (card.suit === 'Spades') room.game.spadesBroken = true;
+    if (!room.game.leadSuit) room.game.leadSuit = effectiveSuit(card, room.rankMode);
+    if (isTrump(card, room.rankMode)) room.game.spadesBroken = true;
 
     if (room.game.trick.length < 4) {
       room.game.currentSeat = nextSeat(current.seat);
@@ -1233,8 +1233,8 @@ io.on('connection', (socket) => {
     player.hand.splice(cardIndex, 1);
 
     room.game.trick.push({ seat: player.seat, card: chosenCard });
-    if (!room.game.leadSuit) room.game.leadSuit = chosenCard.suit;
-    if (chosenCard.suit === 'Spades') room.game.spadesBroken = true;
+    if (!room.game.leadSuit) room.game.leadSuit = effectiveSuit(chosenCard, room.rankMode);
+    if (isTrump(chosenCard, room.rankMode)) room.game.spadesBroken = true;
 
     if (room.game.trick.length < 4) {
       room.game.currentSeat = nextSeat(player.seat);

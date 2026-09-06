@@ -107,10 +107,10 @@ test('in 2s high, 2 of spades beats ace of spades', () => {
   assert.equal(determineWinner(trick, 'Spades', 'ace'), 0);
 });
 
-test('in 2s high, the 2 of a non-spade suit is the highest card of that suit, not a trump', () => {
+test('in 2s high (deuces wild), every deuce becomes trump, not just its own suit\'s top card', () => {
   const { effectiveSuit, isTrump } = require('./spades');
-  assert.equal(effectiveSuit(card('2', 'Diamonds'), 'deuces'), 'Diamonds');
-  assert.equal(isTrump(card('2', 'Diamonds'), 'deuces'), false);
+  assert.equal(effectiveSuit(card('2', 'Diamonds'), 'deuces'), 'Spades');
+  assert.equal(isTrump(card('2', 'Diamonds'), 'deuces'), true);
 
   const twoDiamondsBeatsAceDiamonds = [
     { seat: 0, card: card('A', 'Diamonds') },
@@ -118,25 +118,27 @@ test('in 2s high, the 2 of a non-spade suit is the highest card of that suit, no
   ];
   assert.equal(determineWinner(twoDiamondsBeatsAceDiamonds, 'Diamonds', 'deuces'), 1);
 
-  const anySpadeStillBeatsTwoDiamonds = [
+  const twoDiamondsBeatsAnySpadeToo = [
     { seat: 0, card: card('2', 'Diamonds') },
     { seat: 1, card: card('4', 'Spades') },
   ];
-  assert.equal(determineWinner(anySpadeStillBeatsTwoDiamonds, 'Diamonds', 'deuces'), 1);
+  assert.equal(determineWinner(twoDiamondsBeatsAnySpadeToo, 'Diamonds', 'deuces'), 0);
 });
 
-test('in 2s high, a 2 of hearts or clubs is that suit\'s highest card too', () => {
-  const twoHeartsBeatsAceHearts = [
-    { seat: 0, card: card('A', 'Hearts') },
+test('in 2s high, the four deuces rank among themselves as S > H > C > D', () => {
+  const twoHeartsBeatsTwoClubs = [
+    { seat: 0, card: card('2', 'Clubs') },
     { seat: 1, card: card('2', 'Hearts') },
   ];
-  assert.equal(determineWinner(twoHeartsBeatsAceHearts, 'Hearts', 'deuces'), 1);
+  assert.equal(determineWinner(twoHeartsBeatsTwoClubs, 'Clubs', 'deuces'), 1);
 
-  const twoClubsBeatsAceClubs = [
-    { seat: 0, card: card('A', 'Clubs') },
-    { seat: 1, card: card('2', 'Clubs') },
+  const twoSpadesBeatsEveryOtherDeuce = [
+    { seat: 0, card: card('2', 'Hearts') },
+    { seat: 1, card: card('2', 'Spades') },
+    { seat: 2, card: card('2', 'Clubs') },
+    { seat: 3, card: card('2', 'Diamonds') },
   ];
-  assert.equal(determineWinner(twoClubsBeatsAceClubs, 'Clubs', 'deuces'), 1);
+  assert.equal(determineWinner(twoSpadesBeatsEveryOtherDeuce, 'Hearts', 'deuces'), 1);
 });
 
 test('in standard ace-high mode, twos stay low in every suit', () => {
