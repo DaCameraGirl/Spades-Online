@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sortHand, pickBotCard, determineWinner, scoreTeamSeats } = require('./spades');
+const { sortHand, pickBotCard, determineWinner, scoreTeamSeats, matchWinningTeam } = require('./spades');
 
 function card(rank, suit) {
   return { rank, suit, code: `${rank}${suit[0]}` };
@@ -158,4 +158,17 @@ test('bot covers partner nil by overtaking the nil partner when possible', () =>
   const played = pickBotCard(hand, 'Clubs', false, trick, 2, 'ace', { 0: 0, 2: 4 });
   assert.equal(played.rank, 'K');
   assert.equal(played.suit, 'Clubs');
+});
+
+test('no match winner below the target score', () => {
+  assert.equal(matchWinningTeam({ 0: 180, 1: 90 }, 250), null);
+});
+
+test('the team at or above the target with the higher score wins the match', () => {
+  assert.equal(matchWinningTeam({ 0: 260, 1: 94 }, 250), 0);
+  assert.equal(matchWinningTeam({ 0: 94, 1: 260 }, 250), 1);
+});
+
+test('a tie at or above the target keeps the match going', () => {
+  assert.equal(matchWinningTeam({ 0: 260, 1: 260 }, 250), null);
 });

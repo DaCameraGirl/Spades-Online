@@ -474,7 +474,7 @@ test('lobby table: joining a numbered table seats the player and updates occupan
   const watcherLobby = createLobbyState(watcher);
   t.after(() => closeSocket(watcher));
   watcher.emit('joinLobby', { lobbyRoomId: 'advance', name: 'Watcher' });
-  await waitState(watcherLobby, (state) => Array.isArray(state.tables) && state.tables.length === 50);
+  await waitState(watcherLobby, (state) => Array.isArray(state.tables) && state.tables.length === 25);
 
   const player = await connect(sharedPort, 'table-player');
   const playerState = createState(player);
@@ -493,7 +493,7 @@ test('lobby table: a fifth arrival at a full table becomes a spectator instead o
   for (const token of tokens) {
     const seatSocket = await connect(sharedPort, token);
     sockets.push(seatSocket);
-    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 33, name: token });
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 18, name: token });
   }
   t.after(() => sockets.forEach(closeSocket));
   await Promise.all(sockets.map((seatSocket) => waitFor(seatSocket, 'roomState', (payload) => payload.players.filter(Boolean).length === 4)));
@@ -501,7 +501,7 @@ test('lobby table: a fifth arrival at a full table becomes a spectator instead o
   const watcher = await connect(sharedPort, 'spec-watcher');
   const watcherState = createState(watcher);
   t.after(() => closeSocket(watcher));
-  watcher.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 33, name: 'Watcher' });
+  watcher.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 18, name: 'Watcher' });
   const seen = await waitState(watcherState, (state) => state.isSpectator === true);
   assert.equal(seen.players.filter(Boolean).length, 4);
   seen.players.forEach((seat) => assert.equal(seat.hand.length, 0, 'a spectator never receives anyone\'s hand'));
@@ -511,7 +511,7 @@ test('leaveTable: leaving before a hand starts frees the seat for someone else',
   const solo = await connect(sharedPort, 'leave-solo');
   const soloState = createState(solo);
   t.after(() => closeSocket(solo));
-  solo.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 45, name: 'Solo' });
+  solo.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 23, name: 'Solo' });
   await waitState(soloState, (state) => state.players.some((seat) => seat && seat.isYou));
 
   solo.emit('leaveTable', { roomCode: soloState().roomCode });
@@ -519,7 +519,7 @@ test('leaveTable: leaving before a hand starts frees the seat for someone else',
   const other = await connect(sharedPort, 'leave-other');
   const otherState = createState(other);
   t.after(() => closeSocket(other));
-  other.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 45, name: 'Other' });
+  other.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 23, name: 'Other' });
   const seated = await waitState(otherState, (state) => state.players.filter(Boolean).length === 1);
   assert.equal(seated.players.find((seat) => seat && seat.isYou).name, 'Other', 'the freed seat is available again, not stuck occupied');
 });
@@ -586,7 +586,7 @@ test('lobby table: locking blocks new public arrivals, but the table code still 
   const host = await connect(sharedPort, 'lock-host');
   const hostState = createState(host);
   t.after(() => closeSocket(host));
-  host.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 44, name: 'Host' });
+  host.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 20, name: 'Host' });
   const seated = await waitState(hostState, (state) => state.players.some((seat) => seat && seat.isYou));
   const roomCode = seated.roomCode;
 
@@ -596,7 +596,7 @@ test('lobby table: locking blocks new public arrivals, but the table code still 
   const stranger = await connect(sharedPort, 'lock-stranger');
   t.after(() => closeSocket(stranger));
   const strangerError = waitFor(stranger, 'errorMessage');
-  stranger.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 44, name: 'Stranger' });
+  stranger.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 20, name: 'Stranger' });
   assert.equal(await strangerError, 'This table is locked. Ask for the table code to join.');
 
   const friend = await connect(sharedPort, 'lock-friend');
@@ -648,7 +648,7 @@ test('voteKick: two votes remove a seated human, converting the seat to a bot mi
     const seatSocket = await connect(sharedPort, token);
     sockets.push(seatSocket);
     states.push(createState(seatSocket));
-    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 27, name: token });
+    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 24, name: token });
   }
   t.after(() => sockets.forEach(closeSocket));
   await waitState(states[3], (state) => state.game && state.game.phase === 'bidding');
@@ -676,7 +676,7 @@ test('voteKick: you cannot vote to kick yourself', async (t) => {
     const seatSocket = await connect(sharedPort, token);
     sockets.push(seatSocket);
     states.push(createState(seatSocket));
-    seatSocket.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 31, name: token });
+    seatSocket.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 25, name: token });
   }
   t.after(() => sockets.forEach(closeSocket));
   await waitState(states[3], (state) => state.players.filter(Boolean).length === 4);
@@ -695,7 +695,7 @@ test('turn timer: a player who lets their turn expire is benched to a spectator 
     const seatSocket = await connect(sharedPort, token);
     sockets.push(seatSocket);
     states.push(createState(seatSocket));
-    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 40, name: token });
+    seatSocket.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 19, name: token });
   }
   t.after(() => sockets.forEach(closeSocket));
   const started = await waitState(states[0], (state) => state.game && state.game.phase === 'bidding');
@@ -797,6 +797,63 @@ test('rankMode: the host can switch to 2s high before the hand starts, and a non
   await waitState(states[0], (state) => state.rankMode === 'deuces');
 });
 
+test('match: the match ends once a team reaches the stake target, instead of dealing forever', async (t) => {
+  const host = await connect(sharedPort, 'match-end-host');
+  const hostState = createState(host);
+  t.after(() => closeSocket(host));
+
+  host.emit('createRoom', { name: 'Solo Host', stake: 250, rankMode: 'ace' });
+  let state = await waitFor(host, 'roomState', (payload) => payload.roomCode);
+  const roomCode = state.roomCode;
+
+  host.emit('startGame', { roomCode });
+  state = await waitState(hostState, (payload) => payload.game && payload.game.phase === 'bidding', 5000, 'first hand dealt');
+
+  let safety = 0;
+  while (!state.game.matchOver && safety < 400) {
+    safety += 1;
+    const me = state.players.find((player) => player.isYou);
+
+    if (state.game.phase === 'bidding') {
+      if (state.game.currentSeat === me.seat && me.bid == null) {
+        host.emit('submitBid', { roomCode, bid: 3 });
+      }
+      state = await waitState(hostState, (payload) => payload.game && (
+        payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat
+      ), 5000, 'bid progress');
+      continue;
+    }
+
+    if (state.game.phase === 'playing') {
+      if (!state.game.resolving && state.game.currentSeat === me.seat) {
+        const card = playableCard(me.hand, state.game);
+        host.emit('playCard', { roomCode, cardCode: card.code });
+      }
+      state = await waitState(hostState, (payload) => payload.game && (
+        payload.game.phase === 'finished'
+        || payload.game.currentSeat !== state.game.currentSeat
+        || Boolean(payload.game.resolving) !== Boolean(state.game.resolving)
+      ), 5000, 'play progress');
+      continue;
+    }
+
+    if (state.game.phase === 'finished') {
+      state = await waitState(hostState, (payload) => payload.game && (
+        payload.game.matchOver || payload.game.phase === 'bidding'
+      ), 5000, 'next hand or match end');
+    }
+  }
+
+  assert.equal(state.game.matchOver, true, 'the match ends once a team crosses the stake target');
+  assert.equal(typeof state.game.matchWinner, 'number');
+  const winnerScore = state.game.scores[state.game.matchWinner];
+  assert.ok(winnerScore >= 250, `winning team's score (${winnerScore}) should be at least the stake target`);
+
+  const dealError = waitFor(host, 'errorMessage');
+  host.emit('nextHand', { roomCode });
+  assert.equal(await dealError, 'The match is over. Start a new game to keep playing.');
+});
+
 test('lobby table: the hand auto-starts once four humans are seated, no host action needed', async (t) => {
   const tokens = ['auto-p1', 'auto-p2', 'auto-p3', 'auto-p4'];
   const sockets = [];
@@ -805,7 +862,7 @@ test('lobby table: the hand auto-starts once four humans are seated, no host act
     const seatSocket = await connect(sharedPort, token);
     sockets.push(seatSocket);
     states.push(createState(seatSocket));
-    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 40, name: token });
+    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 25, name: token });
   }
   t.after(() => sockets.forEach(closeSocket));
   await waitState(states[3], (state) => state.game && state.game.phase === 'bidding');

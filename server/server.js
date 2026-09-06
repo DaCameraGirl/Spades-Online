@@ -21,7 +21,7 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
-const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats } = require('./spades');
+const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats, matchWinningTeam } = require('./spades');
 
 const STAKES = [250, 500, 1000];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
@@ -40,7 +40,7 @@ const LOBBY_ROOMS = [
   { id: 'advance', label: 'Advance Room', ratingLabel: '1600-1650' },
   { id: 'expert', label: 'Expert Room', ratingLabel: '1651+' },
 ];
-const TABLES_PER_LOBBY = 50;
+const TABLES_PER_LOBBY = 25;
 const CHAT_HISTORY_LIMIT = 50;
 const lobbyMembers = new Map(LOBBY_ROOMS.map((lobbyRoom) => [lobbyRoom.id, new Map()]));
 const lobbyChat = new Map(LOBBY_ROOMS.map((lobbyRoom) => [lobbyRoom.id, []]));
@@ -455,8 +455,18 @@ function finishHand(room) {
 
   room.game.phase = 'finished';
   room.game.resolving = false;
-  room.game.message = `Hand complete — Team 1: ${room.game.totalScores[0]} | Team 2: ${room.game.totalScores[1]}. Dealing the next hand...`;
   room.game.currentSeat = room.game.dealerSeat;
+
+  const winningTeam = matchWinningTeam(room.game.totalScores, room.stake);
+  if (winningTeam !== null) {
+    const losingTeam = winningTeam === 0 ? 1 : 0;
+    room.game.matchOver = true;
+    room.game.matchWinner = winningTeam;
+    room.game.message = `Match over — Team ${winningTeam + 1} wins ${room.game.totalScores[winningTeam]} to ${room.game.totalScores[losingTeam]}!`;
+    return;
+  }
+
+  room.game.message = `Hand complete — Team 1: ${room.game.totalScores[0]} | Team 2: ${room.game.totalScores[1]}. Dealing the next hand...`;
   queueNextHand(room);
 }
 
@@ -716,6 +726,8 @@ function buildPlayerPayload(room, socketId) {
         tricksWon: room.game.tricksWon || { 0: 0, 1: 0 },
         resolving: Boolean(room.game.resolving),
         spadesBroken: Boolean(room.game.spadesBroken),
+        matchOver: Boolean(room.game.matchOver),
+        matchWinner: room.game.matchWinner ?? null,
       }
     : null;
 
@@ -1091,6 +1103,10 @@ io.on('connection', (socket) => {
     }
     if (!room.game || room.game.phase !== 'finished') {
       socket.emit('errorMessage', 'Finish the current hand first.');
+      return;
+    }
+    if (room.game.matchOver) {
+      socket.emit('errorMessage', 'The match is over. Start a new game to keep playing.');
       return;
     }
 

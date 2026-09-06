@@ -613,8 +613,9 @@ function render() {
   }
 
   const playerCount = roomState.players.filter(Boolean).length;
-  const finished = roomState.game && roomState.game.phase === 'finished';
-  const canStart = roomState.isHost && playerCount > 0 && !roomState.game;
+  const matchOver = Boolean(roomState.game && roomState.game.matchOver);
+  const finished = roomState.game && roomState.game.phase === 'finished' && !matchOver;
+  const canStart = roomState.isHost && playerCount > 0 && (!roomState.game || matchOver);
   const canDealNext = roomState.isHost && finished;
 
   startGameBtn.disabled = !(canStart || canDealNext);
@@ -624,6 +625,8 @@ function render() {
   } else if (finished) {
     startGameBtn.textContent = 'Dealing next hand...';
     startGameBtn.disabled = true;
+  } else if (matchOver && canStart) {
+    startGameBtn.textContent = 'Start new match';
   } else if (canStart) {
     startGameBtn.textContent = 'Start game';
   } else if (roomState.game) {
@@ -784,7 +787,7 @@ startGameBtn.addEventListener('click', () => {
     SpadesAudio.unlock();
     SpadesAudio.deal();
   }
-  if (roomState.game && roomState.game.phase === 'finished') {
+  if (roomState.game && roomState.game.phase === 'finished' && !roomState.game.matchOver) {
     socket.emit('nextHand', { roomCode: roomState.roomCode });
     return;
   }

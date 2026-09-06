@@ -128,6 +128,14 @@ function scoreContract(contractBid, tricksWon) {
   return -contractBid * 10;
 }
 
+function matchWinningTeam(totalScores, target) {
+  const team0 = totalScores[0] || 0;
+  const team1 = totalScores[1] || 0;
+  if (team0 < target && team1 < target) return null;
+  if (team0 === team1) return null;
+  return team0 > team1 ? 0 : 1;
+}
+
 function scoreTeamSeats(seats, bids, tricksBySeat) {
   const contractBid = seats.reduce((sum, seat) => {
     const bid = bids[seat];
@@ -207,4 +215,5 @@ module.exports = {
   isTrump,
   effectiveSuit,
   scoreTeamSeats,
+  matchWinningTeam,
 };
