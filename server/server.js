@@ -176,6 +176,7 @@ function vacateSeat(room, index) {
       return { deleted: true, gameInProgress };
     }
     room.locked = false;
+    room.chatLog = [];
   }
   return { deleted: false, gameInProgress };
 }
@@ -429,6 +430,10 @@ function getPlayerBySession(sessionToken) {
   return null;
 }
 
+function sendTableChatHistory(socket, room) {
+  socket.emit('tableChatHistory', room.chatLog || []);
+}
+
 function attachPlayer(room, player, socket) {
   const graceTimer = room.graceTimers && room.graceTimers.get(player.sessionToken);
   if (graceTimer) clearTimeout(graceTimer);
@@ -439,6 +444,7 @@ function attachPlayer(room, player, socket) {
   if (room.hostSessionToken === player.sessionToken) room.hostSocketId = socket.id;
   socket.join(room.code);
   socket.data.roomCode = room.code;
+  sendTableChatHistory(socket, room);
   persistRooms();
   broadcastRoom(room);
 }
@@ -830,6 +836,24 @@ io.on('connection', (socket) => {
     io.to(lobbyChannel(lobbyRoomId)).emit('lobbyChatMessage', message);
   });
 
+  socket.on('sendTableChat', ({ roomCode, text }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+
+    const speaker = getPlayerInRoom(room, socket.id)
+      || (room.spectators || []).find((spectator) => spectator.socketId === socket.id);
+    if (!speaker) return;
+
+    const trimmed = String(text || '').trim().slice(0, 200);
+    if (!trimmed) return;
+
+    const message = { name: speaker.name, text: trimmed, at: Date.now() };
+    room.chatLog = room.chatLog || [];
+    room.chatLog.push(message);
+    if (room.chatLog.length > CHAT_HISTORY_LIMIT) room.chatLog.shift();
+    io.to(room.code).emit('tableChatMessage', message);
+  });
+
   socket.on('joinTable', ({ lobbyRoomId, tableNumber, name, watchSeat }) => {
     const table = getLobbyTable(lobbyRoomId, tableNumber);
     if (!table) {
@@ -862,6 +886,7 @@ io.on('connection', (socket) => {
     if (requestedWatchSeat !== null) {
       socket.join(table.code);
       socket.data.roomCode = table.code;
+      sendTableChatHistory(socket, table);
       addSpectator(table, socket.id, name || 'Guest', requestedWatchSeat);
       broadcastRoom(table);
       return;
@@ -871,6 +896,7 @@ io.on('connection', (socket) => {
     const seated = seatPlayer(table, socket.id, name || 'Player', sessionToken);
     socket.join(table.code);
     socket.data.roomCode = table.code;
+    sendTableChatHistory(socket, table);
 
     if (seated) {
       if (wasEmpty) {
@@ -1035,6 +1061,7 @@ io.on('connection', (socket) => {
     seatPlayer(room, socket.id, name || 'Host', sessionToken);
     socket.join(room.code);
     socket.data.roomCode = room.code;
+    sendTableChatHistory(socket, room);
     broadcastRoom(room);
   });
 
@@ -1073,6 +1100,7 @@ io.on('connection', (socket) => {
 
     socket.join(room.code);
     socket.data.roomCode = room.code;
+    sendTableChatHistory(socket, room);
     broadcastRoom(room);
   });
 

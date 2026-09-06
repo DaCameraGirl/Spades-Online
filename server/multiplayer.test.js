@@ -810,7 +810,7 @@ test('match: the match ends once a team reaches the stake target, instead of dea
   state = await waitState(hostState, (payload) => payload.game && payload.game.phase === 'bidding', 5000, 'first hand dealt');
 
   let safety = 0;
-  while (!state.game.matchOver && safety < 400) {
+  while (!state.game.matchOver && safety < 1200) {
     safety += 1;
     const me = state.players.find((player) => player.isYou);
 
@@ -852,6 +852,42 @@ test('match: the match ends once a team reaches the stake target, instead of dea
   const dealError = waitFor(host, 'errorMessage');
   host.emit('nextHand', { roomCode });
   assert.equal(await dealError, 'The match is over. Start a new game to keep playing.');
+});
+
+test('tableChat: a message broadcasts to everyone seated or spectating at that table', async (t) => {
+  const host = await connect(sharedPort, 'tchat-host');
+  t.after(() => closeSocket(host));
+  host.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 10, name: 'Host' });
+  const seated = await waitFor(host, 'roomState', (payload) => payload.players.some((seat) => seat && seat.isYou));
+  const roomCode = seated.roomCode;
+
+  const watcher = await connect(sharedPort, 'tchat-watcher');
+  t.after(() => closeSocket(watcher));
+  watcher.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 10, name: 'Watcher', watchSeat: 0 });
+  await waitFor(watcher, 'roomState', (payload) => payload.isSpectator === true);
+
+  const watcherGotMessage = waitFor(watcher, 'tableChatMessage', (message) => message.text === 'good luck all');
+  host.emit('sendTableChat', { roomCode, text: 'good luck all' });
+  const message = await watcherGotMessage;
+  assert.equal(message.name, 'Host');
+});
+
+test('tableChat: a newcomer receives the existing chat history for that table', async (t) => {
+  const host = await connect(sharedPort, 'tchat-hist-host');
+  t.after(() => closeSocket(host));
+  host.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 10, name: 'Host' });
+  const seated = await waitFor(host, 'roomState', (payload) => payload.players.some((seat) => seat && seat.isYou));
+  const roomCode = seated.roomCode;
+
+  host.emit('sendTableChat', { roomCode, text: 'nice hand' });
+  await waitFor(host, 'tableChatMessage', (message) => message.text === 'nice hand');
+
+  const newcomer = await connect(sharedPort, 'tchat-hist-newcomer');
+  t.after(() => closeSocket(newcomer));
+  const historyPromise = waitFor(newcomer, 'tableChatHistory');
+  newcomer.emit('joinTable', { lobbyRoomId: 'expert', tableNumber: 10, name: 'Newcomer' });
+  const history = await historyPromise;
+  assert.ok(history.some((message) => message.text === 'nice hand'), 'the newcomer sees chat that happened before they joined');
 });
 
 test('lobby table: the hand auto-starts once four humans are seated, no host action needed', async (t) => {

@@ -46,6 +46,13 @@ const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
 const leaveTableBtn = document.getElementById('leaveTableBtn');
 const lockTableBtn = document.getElementById('lockTableBtn');
+const tableChatToggleBtn = document.getElementById('tableChatToggleBtn');
+const tableChatBadge = document.getElementById('tableChatBadge');
+const tableChatPanel = document.getElementById('tableChatPanel');
+const tableChatCloseBtn = document.getElementById('tableChatCloseBtn');
+const tableChatLog = document.getElementById('tableChatLog');
+const tableChatInput = document.getElementById('tableChatInput');
+const tableChatSendBtn = document.getElementById('tableChatSendBtn');
 const turnTimerSelect = document.getElementById('turnTimerSelect');
 const soundToggles = [...document.querySelectorAll('[data-sound-toggle]')];
 const tableCall = document.getElementById('tableCall');
@@ -638,6 +645,58 @@ function appendChatMessage(message) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+let tableChatUnread = 0;
+
+function setTableChatUnread(count) {
+  tableChatUnread = count;
+  tableChatBadge.textContent = String(count);
+  tableChatBadge.classList.toggle('hidden', count === 0);
+}
+
+function renderTableChatLine(message) {
+  const line = document.createElement('div');
+  line.className = 'chat-line';
+  line.innerHTML = `<strong>${escapeHtml(message.name)}:</strong> ${escapeHtml(message.text)}`;
+  tableChatLog.appendChild(line);
+  tableChatLog.scrollTop = tableChatLog.scrollHeight;
+}
+
+function appendTableChatMessage(message) {
+  renderTableChatLine(message);
+  if (tableChatPanel.classList.contains('hidden')) {
+    setTableChatUnread(tableChatUnread + 1);
+  }
+}
+
+function openTableChat() {
+  tableChatPanel.classList.remove('hidden');
+  setTableChatUnread(0);
+  tableChatInput.focus();
+}
+
+function closeTableChat() {
+  tableChatPanel.classList.add('hidden');
+}
+
+tableChatToggleBtn.addEventListener('click', () => {
+  if (tableChatPanel.classList.contains('hidden')) openTableChat();
+  else closeTableChat();
+});
+
+tableChatCloseBtn.addEventListener('click', closeTableChat);
+
+function sendTableChat() {
+  const text = tableChatInput.value.trim();
+  if (!text || !roomState || !roomState.roomCode) return;
+  socket.emit('sendTableChat', { roomCode: roomState.roomCode, text });
+  tableChatInput.value = '';
+}
+
+tableChatSendBtn.addEventListener('click', sendTableChat);
+tableChatInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') sendTableChat();
+});
+
 function sendChatMessage() {
   const text = chatInput.value.trim();
   if (!text || !currentLobbyRoomId) return;
@@ -754,6 +813,16 @@ socket.on('lobbyState', (payload) => {
   if (payload.lobbyRoomId !== currentLobbyRoomId) return;
   renderTableGrid(payload.tables);
   renderRoster(payload.roster);
+});
+
+socket.on('tableChatHistory', (history) => {
+  tableChatLog.innerHTML = '';
+  setTableChatUnread(0);
+  (history || []).forEach(renderTableChatLine);
+});
+
+socket.on('tableChatMessage', (message) => {
+  appendTableChatMessage(message);
 });
 
 socket.on('lobbyChatHistory', (history) => {
@@ -915,6 +984,9 @@ leaveTableBtn.addEventListener('click', () => {
   socket.emit('leaveTable', { roomCode: roomState.roomCode });
   roomState = null;
   mySeat = null;
+  tableChatLog.innerHTML = '';
+  setTableChatUnread(0);
+  closeTableChat();
   if (wasLobbyTable) {
     showRoomView();
   } else {
