@@ -6,6 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
 const auth = require('./auth');
+const { recordRatedMatch } = require('./matches');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -337,7 +338,7 @@ function createRoom() {
   return room;
 }
 
-function seatPlayer(room, socketId, name, sessionToken) {
+function seatPlayer(room, socketId, name, sessionToken, accountPlayerId = null) {
   const seat = room.players.findIndex((player) => !player);
   if (seat === -1) return false;
 
@@ -352,9 +353,24 @@ function seatPlayer(room, socketId, name, sessionToken) {
     connected: true,
     ready: false,
     isBot: false,
+    accountPlayerId,
   };
   if (room.kickVotes) room.kickVotes.delete(seat);
   return true;
+}
+
+// Resolves a client-supplied account bearer token to a verified player
+// record via the sessions table, never trusts a client-supplied identity
+// directly, only what the token actually proves. Used to attach a real
+// player id to a seat so a completed match can award Elo to the right
+// accounts, not just whatever display name the client happened to send.
+async function resolveAccountPlayer(accountToken) {
+  if (!accountToken) return null;
+  try {
+    return await auth.getPlayerBySession(accountToken);
+  } catch {
+    return null;
+  }
 }
 
 function isBotPlayer(player) {
@@ -474,6 +490,31 @@ function attachPlayer(room, player, socket) {
   broadcastRoom(room);
 }
 
+// Best-effort side effect of a match ending: award Elo if all 4 seats are
+// authenticated humans (no bots). Never blocks or throws into the game
+// loop, a rating-service hiccup should not be able to disrupt gameplay.
+function awardRatedMatch(room, winningTeam) {
+  const teamASeats = [0, 2];
+  const teamBSeats = [1, 3];
+  const allSeated = [...teamASeats, ...teamBSeats].every((seat) => {
+    const player = room.players[seat];
+    return player && !player.isBot && player.accountPlayerId;
+  });
+  if (!allSeated) return;
+
+  const teamAPlayerIds = teamASeats.map((seat) => room.players[seat].accountPlayerId);
+  const teamBPlayerIds = teamBSeats.map((seat) => room.players[seat].accountPlayerId);
+
+  recordRatedMatch({
+    idempotencyKey: room.game.matchId,
+    teamAPlayerIds,
+    teamBPlayerIds,
+    winningTeam: winningTeam === 0 ? 'A' : 'B',
+  }).catch((error) => {
+    console.error('Failed to record rated match', error);
+  });
+}
+
 function finishHand(room) {
   if (!room.game) return;
 
@@ -494,6 +535,7 @@ function finishHand(room) {
     room.game.matchOver = true;
     room.game.matchWinner = winningTeam;
     room.game.message = `Match over — Team ${winningTeam + 1} wins ${room.game.totalScores[winningTeam]} to ${room.game.totalScores[losingTeam]}!`;
+    awardRatedMatch(room, winningTeam);
     return;
   }
 
@@ -673,6 +715,11 @@ function dealHand(room, { preserveScores = false } = {}) {
     : { 0: 0, 1: 0 };
   const previousRound = preserveScores && room.game ? room.game.round || 1 : 0;
   const dealerSeat = preserveScores && room.game ? nextSeat(room.game.dealerSeat ?? 0) : 0;
+  // One id per match (not per hand), so a completed match can be recorded
+  // for Elo exactly once even though a match spans many hands.
+  const matchId = preserveScores && room.game && room.game.matchId
+    ? room.game.matchId
+    : crypto.randomUUID();
 
   const deck = makeDeck();
   room.players.forEach((player, index) => {
@@ -698,6 +745,7 @@ function dealHand(room, { preserveScores = false } = {}) {
     totalScores: previousScores,
     message: 'Bidding is open. Choose Nil or bid from 1 to 13.',
     lastTrick: null,
+    matchId,
   };
 
   room.status = 'playing';
@@ -950,7 +998,7 @@ io.on('connection', (socket) => {
     io.to(room.code).emit('tableChatMessage', message);
   });
 
-  socket.on('joinTable', ({ lobbyRoomId, tableNumber, name, watchSeat }) => {
+  socket.on('joinTable', async ({ lobbyRoomId, tableNumber, name, watchSeat, accountToken }) => {
     const table = getLobbyTable(lobbyRoomId, tableNumber);
     if (!table) {
       socket.emit('errorMessage', 'Table not found.');
@@ -989,7 +1037,8 @@ io.on('connection', (socket) => {
     }
 
     const wasEmpty = table.players.every((player) => !player) && !(table.spectators || []).length;
-    const seated = seatPlayer(table, socket.id, name || 'Player', sessionToken);
+    const accountPlayer = await resolveAccountPlayer(accountToken);
+    const seated = seatPlayer(table, socket.id, accountPlayer ? accountPlayer.screenName : (name || 'Player'), sessionToken, accountPlayer ? accountPlayer.id : null);
     socket.join(table.code);
     socket.data.roomCode = table.code;
     sendTableChatHistory(socket, table);
@@ -1185,7 +1234,7 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  socket.on('createRoom', ({ name, stake, rankMode }) => {
+  socket.on('createRoom', async ({ name, stake, rankMode, accountToken }) => {
     if (getPlayerBySession(sessionToken)) {
       socket.emit('errorMessage', 'This session is already seated at a table.');
       return;
@@ -1195,14 +1244,15 @@ io.on('connection', (socket) => {
     room.rankMode = rankMode === 'deuces' ? 'deuces' : 'ace';
     room.hostSessionToken = sessionToken;
     room.hostSocketId = socket.id;
-    seatPlayer(room, socket.id, name || 'Host', sessionToken);
+    const accountPlayer = await resolveAccountPlayer(accountToken);
+    seatPlayer(room, socket.id, accountPlayer ? accountPlayer.screenName : (name || 'Host'), sessionToken, accountPlayer ? accountPlayer.id : null);
     socket.join(room.code);
     socket.data.roomCode = room.code;
     sendTableChatHistory(socket, room);
     broadcastRoom(room);
   });
 
-  socket.on('joinRoom', ({ code, name }) => {
+  socket.on('joinRoom', async ({ code, name, accountToken }) => {
     const room = getRoomByCode(code);
     if (!room) {
       socket.emit('errorMessage', 'Room not found.');
@@ -1229,7 +1279,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const seated = seatPlayer(room, socket.id, name || 'Player', sessionToken);
+    const accountPlayer = await resolveAccountPlayer(accountToken);
+    const seated = seatPlayer(room, socket.id, accountPlayer ? accountPlayer.screenName : (name || 'Player'), sessionToken, accountPlayer ? accountPlayer.id : null);
     if (!seated) {
       socket.emit('errorMessage', 'Room is full.');
       return;
