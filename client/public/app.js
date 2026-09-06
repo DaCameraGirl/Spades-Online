@@ -298,14 +298,34 @@ socket.on('disconnect', () => {
   statusBadge.style.background = 'rgba(233, 198, 109, 0.12)';
 });
 
-function sortHand(cards) {
+const RANK_ORDER = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13, A: 14 };
+
+function isTrumpCard(card, mode) {
+  if (card.suit === 'Spades') return true;
+  return mode === 'deuces' && card.rank === '2' && card.suit === 'Diamonds';
+}
+
+function trumpPower(card, mode) {
+  if (!isTrumpCard(card, mode)) return 0;
+  if (mode === 'deuces') {
+    if (card.rank === '2' && card.suit === 'Spades') return 100;
+    if (card.rank === '2' && card.suit === 'Diamonds') return 99;
+  }
+  return RANK_ORDER[card.rank];
+}
+
+function sortHand(cards, mode = 'ace') {
   const suitOrder = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
-  const rankOrder = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, J: 11, Q: 12, K: 13, A: 14 };
 
   return [...cards].sort((a, b) => {
+    const aTrump = isTrumpCard(a, mode);
+    const bTrump = isTrumpCard(b, mode);
+    const trumpDiff = Number(bTrump) - Number(aTrump);
+    if (trumpDiff !== 0) return trumpDiff;
+    if (aTrump && bTrump) return trumpPower(b, mode) - trumpPower(a, mode);
     const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
     if (suitDiff !== 0) return suitDiff;
-    return rankOrder[b.rank] - rankOrder[a.rank];
+    return RANK_ORDER[b.rank] - RANK_ORDER[a.rank];
   });
 }
 
@@ -477,7 +497,7 @@ function renderHand() {
   }
 
   handArea.innerHTML = '';
-  const cards = sortHand(myPlayer.hand || []);
+  const cards = sortHand(myPlayer.hand || [], roomState.rankMode);
   const isMyTurn = roomState.game
     && roomState.game.currentSeat === mySeat
     && roomState.game.phase === 'playing'
