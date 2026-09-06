@@ -58,7 +58,7 @@ function followPower(card, mode = 'ace') {
   return rankValue(card, mode);
 }
 
-function sortHand(hand, mode = 'ace') {
+function sortByTrumpAndSuit(hand, mode) {
   return [...hand].sort((a, b) => {
     const trumpDiff = Number(isTrump(b, mode)) - Number(isTrump(a, mode));
     if (trumpDiff !== 0) return trumpDiff;
@@ -69,6 +69,19 @@ function sortHand(hand, mode = 'ace') {
     if (suitDiff !== 0) return suitDiff;
     return rankValue(b, mode) - rankValue(a, mode);
   });
+}
+
+// In 2s-high mode the deuces are shown as their own top-of-hand group
+// (spade 2 first, then hearts/clubs/diamonds), ahead of the aces, since
+// that's the whole point of the house rule — the rest of the hand sorts
+// normally behind them.
+function sortHand(hand, mode = 'ace') {
+  if (!isDeuces(mode)) return sortByTrumpAndSuit(hand, mode);
+
+  const twos = hand.filter((card) => card.rank === '2')
+    .sort((a, b) => SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit));
+  const rest = hand.filter((card) => card.rank !== '2');
+  return [...twos, ...sortByTrumpAndSuit(rest, mode)];
 }
 
 function lowest(cards, mode = 'ace') {

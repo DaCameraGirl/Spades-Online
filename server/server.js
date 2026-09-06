@@ -528,6 +528,11 @@ function queueBotTurn(room) {
 
 function resolveCompletedTrick(room) {
   const winningSeat = determineWinner(room.game.trick, room.game.leadSuit, room.rankMode);
+  room.game.lastTrick = {
+    cards: room.game.trick.map((entry) => ({ seat: entry.seat, card: entry.card })),
+    leadSuit: room.game.leadSuit,
+    winnerSeat: winningSeat,
+  };
   const winningTeam = teamForSeat(winningSeat);
   room.game.tricksWon[winningTeam] = (room.game.tricksWon[winningTeam] || 0) + 1;
   room.game.tricksBySeat[winningSeat] = (room.game.tricksBySeat[winningSeat] || 0) + 1;
@@ -665,6 +670,7 @@ function dealHand(room, { preserveScores = false } = {}) {
     tricksBySeat: { 0: 0, 1: 0, 2: 0, 3: 0 },
     totalScores: previousScores,
     message: 'Bidding is open. Choose Nil or bid from 1 to 13.',
+    lastTrick: null,
   };
 
   room.status = 'playing';
@@ -737,6 +743,7 @@ function buildPlayerPayload(room, socketId) {
         spadesBroken: Boolean(room.game.spadesBroken),
         matchOver: Boolean(room.game.matchOver),
         matchWinner: room.game.matchWinner ?? null,
+        lastTrick: room.game.lastTrick || null,
       }
     : null;
 

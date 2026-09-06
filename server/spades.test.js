@@ -76,6 +76,28 @@ test('bot does not lead a 4 when it has a higher legal card', () => {
   assert.equal(played.rank, 'Q');
 });
 
+test('in 2s high, all four deuces sort to the front of the hand, ahead of the aces', () => {
+  const hand = [
+    card('K', 'Spades'),
+    card('2', 'Diamonds'),
+    card('A', 'Hearts'),
+    card('2', 'Spades'),
+    card('9', 'Clubs'),
+    card('2', 'Hearts'),
+  ];
+  const sorted = sortHand(hand, 'deuces');
+  assert.deepEqual(
+    sorted.map((c) => `${c.rank}${c.suit[0]}`),
+    ['2S', '2H', '2D', 'KS', 'AH', '9C'],
+  );
+});
+
+test('in ace-high mode, twos stay put and sort normally within their suit', () => {
+  const hand = [card('K', 'Spades'), card('2', 'Spades'), card('A', 'Hearts')];
+  const sorted = sortHand(hand, 'ace');
+  assert.deepEqual(sorted.map((c) => `${c.rank}${c.suit[0]}`), ['KS', '2S', 'AH']);
+});
+
 test('in 2s high, 2 of spades beats ace of spades', () => {
   const trick = [
     { seat: 0, card: card('A', 'Spades') },

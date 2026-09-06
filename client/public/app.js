@@ -46,6 +46,11 @@ const startGameBtn = document.getElementById('startGameBtn');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
 const leaveTableBtn = document.getElementById('leaveTableBtn');
 const lockTableBtn = document.getElementById('lockTableBtn');
+const lastTrickBtn = document.getElementById('lastTrickBtn');
+const lastTrickModal = document.getElementById('lastTrickModal');
+const lastTrickCloseBtn = document.getElementById('lastTrickCloseBtn');
+const lastTrickWinner = document.getElementById('lastTrickWinner');
+const lastTrickCards = document.getElementById('lastTrickCards');
 const tableChatLog = document.getElementById('tableChatLog');
 const tableChatInput = document.getElementById('tableChatInput');
 const tableChatSendBtn = document.getElementById('tableChatSendBtn');
@@ -316,19 +321,32 @@ function rankValue(card, mode) {
   return RANK_ORDER[card.rank];
 }
 
-function sortHand(cards, mode = 'ace') {
-  const suitOrder = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
+const SUIT_ORDER = ['Spades', 'Hearts', 'Clubs', 'Diamonds'];
 
+function sortByTrumpAndSuit(cards, mode) {
   return [...cards].sort((a, b) => {
     const aTrump = isTrumpCard(a);
     const bTrump = isTrumpCard(b);
     const trumpDiff = Number(bTrump) - Number(aTrump);
     if (trumpDiff !== 0) return trumpDiff;
     if (aTrump && bTrump) return rankValue(b, mode) - rankValue(a, mode);
-    const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
+    const suitDiff = SUIT_ORDER.indexOf(a.suit) - SUIT_ORDER.indexOf(b.suit);
     if (suitDiff !== 0) return suitDiff;
     return rankValue(b, mode) - rankValue(a, mode);
   });
+}
+
+// In 2s-high mode the deuces are grouped at the very front of the hand
+// (spade 2 first, then hearts/clubs/diamonds), ahead of the aces, matching
+// how the server treats them as a top-of-hand group rather than just the
+// top card within each suit's own section.
+function sortHand(cards, mode = 'ace') {
+  if (mode !== 'deuces') return sortByTrumpAndSuit(cards, mode);
+
+  const twos = cards.filter((card) => card.rank === '2')
+    .sort((a, b) => SUIT_ORDER.indexOf(a.suit) - SUIT_ORDER.indexOf(b.suit));
+  const rest = cards.filter((card) => card.rank !== '2');
+  return [...twos, ...sortByTrumpAndSuit(rest, mode)];
 }
 
 function relativeSeat(seatIndex) {
@@ -698,6 +716,8 @@ function render() {
   syncRoomUrl(roomState.roomCode);
   renderTableRosters();
   lockTableBtn.textContent = roomState.locked ? 'Unlock table' : 'Lock table';
+  lastTrickBtn.disabled = !(roomState.game && roomState.game.lastTrick);
+  if (lastTrickBtn.disabled) lastTrickModal.classList.add('hidden');
   turnTimerSelect.disabled = !roomState.isHost;
   if (document.activeElement !== turnTimerSelect) {
     turnTimerSelect.value = String(roomState.turnTimerSeconds || 0);
@@ -963,6 +983,42 @@ turnTimerSelect.addEventListener('change', () => {
 lockTableBtn.addEventListener('click', () => {
   if (!roomState || !roomState.roomCode) return;
   socket.emit('toggleTableLock', { roomCode: roomState.roomCode });
+});
+
+function renderLastTrick() {
+  const lastTrick = roomState && roomState.game && roomState.game.lastTrick;
+  lastTrickCards.innerHTML = '';
+  if (!lastTrick) {
+    lastTrickWinner.textContent = '';
+    return;
+  }
+  const winnerPlayer = roomState.players[lastTrick.winnerSeat];
+  lastTrickWinner.textContent = winnerPlayer ? `${winnerPlayer.name} won this trick` : '';
+  lastTrick.cards.forEach((entry) => {
+    const player = roomState.players[entry.seat];
+    const wrap = document.createElement('div');
+    wrap.className = 'last-trick-entry';
+    if (entry.seat === lastTrick.winnerSeat) wrap.classList.add('last-trick-winning-card');
+    const cardEl = document.createElement('div');
+    cardEl.className = `mini-card ${isRedSuit(entry.card.suit) ? 'red' : ''}`;
+    cardEl.innerHTML = cardMarkup(entry.card);
+    const label = document.createElement('span');
+    label.className = 'last-trick-name';
+    label.textContent = player ? player.name : `Seat ${entry.seat + 1}`;
+    wrap.appendChild(cardEl);
+    wrap.appendChild(label);
+    lastTrickCards.appendChild(wrap);
+  });
+}
+
+lastTrickBtn.addEventListener('click', () => {
+  if (lastTrickBtn.disabled) return;
+  renderLastTrick();
+  lastTrickModal.classList.remove('hidden');
+});
+
+lastTrickCloseBtn.addEventListener('click', () => {
+  lastTrickModal.classList.add('hidden');
 });
 
 leaveTableBtn.addEventListener('click', () => {

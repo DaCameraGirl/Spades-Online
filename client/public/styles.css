@@ -270,6 +270,67 @@ body.game-active .topbar {
   padding: 6px 10px;
 }
 
+.last-trick-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.last-trick-card-box {
+  width: min(420px, 92vw);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(16, 22, 32, 0.98), rgba(4, 6, 10, 0.99));
+  border: 1px solid rgba(233, 198, 109, 0.3);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.last-trick-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--gold-strong);
+  margin-bottom: 8px;
+}
+
+.last-trick-winner {
+  text-align: center;
+  color: var(--teal);
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.last-trick-cards {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.last-trick-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.last-trick-winning-card .mini-card {
+  box-shadow: 0 0 0 3px var(--gold-strong), 0 11px 18px rgba(0, 0, 0, 0.42);
+}
+
+.last-trick-name {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .sound-toggle[aria-pressed="false"] {
   color: var(--muted);
   opacity: 0.7;
@@ -633,14 +694,14 @@ label {
   border-radius: 50%;
   padding: clamp(20px, 2.2vw, 30px);
   background:
-    radial-gradient(ellipse at 31% 10%, rgba(255, 215, 137, 0.4), transparent 23%),
-    linear-gradient(155deg, var(--rail-light) 0%, #6c3b1b 23%, var(--rail) 52%, var(--rail-dark) 100%);
+    radial-gradient(ellipse at 31% 10%, rgba(180, 210, 255, 0.28), transparent 23%),
+    linear-gradient(155deg, var(--rail-light) 0%, #2d4360 23%, var(--rail) 52%, var(--rail-dark) 100%);
   box-shadow:
     0 34px 62px rgba(0, 0, 0, 0.66),
-    0 5px 0 rgba(8, 4, 2, 0.8),
-    inset 0 3px 1px rgba(255, 230, 174, 0.35),
+    0 5px 0 rgba(2, 4, 8, 0.8),
+    inset 0 3px 1px rgba(200, 222, 255, 0.3),
     inset 0 -15px 20px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 2px rgba(35, 16, 6, 0.45);
+    inset 0 0 0 2px rgba(6, 12, 22, 0.5);
   z-index: 2;
 }
 

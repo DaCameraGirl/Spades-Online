@@ -258,6 +258,29 @@ test('four humans: private hands, bid sync, and card-play sync', async (t) => {
   });
 });
 
+test('lastTrick: a completed trick is preserved for review after the pile clears', async (t) => {
+  const tokens = ['lasttrick-host', 'lasttrick-p2', 'lasttrick-p3', 'lasttrick-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  const playingState = await startAndBid(sockets, states, roomCode);
+  let state = playingState;
+  for (let played = 0; played < 4; played += 1) {
+    const seat = state.game.currentSeat;
+    const me = states[seat]().players.find((player) => player.isYou);
+    const card = playableCard(me.hand, state.game);
+    sockets[seat].emit('playCard', { roomCode, cardCode: card.code });
+    state = await waitState(states[0], (payload) => payload.game && (
+      (payload.game.trick || []).length !== (state.game.trick || []).length
+      || Boolean(payload.game.resolving) !== Boolean(state.game.resolving)
+    ), 5000, 'card played');
+  }
+
+  const settled = await waitState(states[0], (payload) => payload.game && payload.game.trick.length === 0 && payload.game.lastTrick, 5000, 'trick cleared with lastTrick recorded');
+  assert.equal(settled.game.lastTrick.cards.length, 4);
+  assert.equal(typeof settled.game.lastTrick.winnerSeat, 'number');
+});
+
 test('disconnect during bidding is observable, and reconnecting within the grace period restores seat, hand, and identity', async (t) => {
   const tokens = ['bid-recon-host', 'bid-recon-p2', 'bid-recon-p3', 'bid-recon-p4'];
   const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
