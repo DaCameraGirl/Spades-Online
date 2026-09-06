@@ -201,7 +201,7 @@ body.game-active .app-shell {
   border-radius: 18px;
   background:
     linear-gradient(110deg, rgba(255, 225, 169, 0.075), transparent 28%),
-    linear-gradient(180deg, rgba(34, 24, 18, 0.97), rgba(10, 7, 5, 0.98));
+    linear-gradient(180deg, rgba(16, 22, 32, 0.97), rgba(4, 6, 10, 0.98));
   border: 1px solid rgba(214, 164, 82, 0.25);
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.44),
@@ -282,6 +282,26 @@ body.game-active .topbar {
   border: 1px solid rgba(125, 204, 166, 0.35);
   color: var(--green);
   font-weight: 700;
+  position: relative;
+}
+
+.status-badge::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(125, 204, 166, 0.6);
+  animation: statusPulse 1.8s ease-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes statusPulse {
+  0% { box-shadow: 0 0 0 0 rgba(125, 204, 166, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(125, 204, 166, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(125, 204, 166, 0); }
 }
 
 .table-call {
@@ -319,7 +339,7 @@ body.game-active .content {
   display: none;
   background:
     linear-gradient(110deg, rgba(255, 225, 169, 0.075), transparent 28%),
-    linear-gradient(180deg, rgba(34, 24, 18, 0.97), rgba(10, 7, 5, 0.98));
+    linear-gradient(180deg, rgba(16, 22, 32, 0.97), rgba(4, 6, 10, 0.98));
   border: 1px solid rgba(214, 164, 82, 0.25);
   border-radius: 22px;
   padding: 22px;
@@ -1490,14 +1510,51 @@ label {
   pointer-events: none;
 }
 
+.marquee-sweep {
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--gold-strong), transparent);
+  animation: marqueeSweep 3.2s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes marqueeSweep {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
 #roomSelect h2 {
-  color: var(--gold-strong);
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  position: relative;
+  z-index: 1;
   font-size: clamp(1.7rem, 3vw, 2.3rem);
+  background: linear-gradient(100deg, var(--gold-strong) 30%, #fff8e0 45%, var(--gold-strong) 60%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  animation: fadeInUp 0.6s ease both, titleShine 4.5s ease-in-out 1.2s infinite;
+}
+
+@keyframes titleShine {
+  0%, 60%, 100% { background-position: 200% 0; }
+  30% { background-position: 0% 0; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 #roomSelect .auth-row {
   justify-content: center;
+  position: relative;
+  z-index: 1;
+  animation: fadeInUp 0.6s ease 0.1s both;
 }
 
 .hero-cards {
@@ -1549,10 +1606,30 @@ label {
   font-size: 64px;
 }
 
-.hc-1 { transform: translate(-320px, -170px) rotate(-18deg); }
-.hc-2 { transform: translate(-90px, -230px) rotate(-4deg); }
-.hc-3 { transform: translate(150px, -200px) rotate(10deg); }
-.hc-4 { transform: translate(340px, -140px) rotate(22deg); }
+.hc-1 { animation: floatHc1 7s ease-in-out infinite; }
+.hc-2 { animation: floatHc2 8.5s ease-in-out infinite; }
+.hc-3 { animation: floatHc3 6.5s ease-in-out 0.5s infinite; }
+.hc-4 { animation: floatHc4 9s ease-in-out 1s infinite; }
+
+@keyframes floatHc1 {
+  0%, 100% { transform: translate(-320px, -170px) rotate(-18deg); }
+  50% { transform: translate(-320px, -186px) rotate(-15deg); }
+}
+
+@keyframes floatHc2 {
+  0%, 100% { transform: translate(-90px, -230px) rotate(-4deg); }
+  50% { transform: translate(-90px, -212px) rotate(-7deg); }
+}
+
+@keyframes floatHc3 {
+  0%, 100% { transform: translate(150px, -200px) rotate(10deg); }
+  50% { transform: translate(150px, -218px) rotate(13deg); }
+}
+
+@keyframes floatHc4 {
+  0%, 100% { transform: translate(340px, -140px) rotate(22deg); }
+  50% { transform: translate(340px, -158px) rotate(19deg); }
+}
 
 @media (max-width: 900px) {
   .hero-cards { display: none; }
@@ -1581,12 +1658,30 @@ label {
   border: 1px solid rgba(233, 198, 109, 0.4);
   box-shadow: 0 18px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 235, 188, 0.2), inset 0 0 0 1px rgba(0, 0, 0, 0.3);
   color: var(--text);
+  animation: fadeInUp 0.6s ease both;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.room-card-grid .room-card:nth-child(1) { animation-delay: 0.2s; }
+.room-card-grid .room-card:nth-child(2) { animation-delay: 0.32s; }
+.room-card-grid .room-card:nth-child(3) { animation-delay: 0.44s; }
+
+.room-card:hover {
+  transform: translateY(-6px) scale(1.03);
+  border-color: rgba(255, 224, 150, 0.75);
+  box-shadow: 0 24px 46px rgba(0, 0, 0, 0.5), 0 0 30px rgba(255, 208, 123, 0.28), inset 0 1px 0 rgba(255, 235, 188, 0.25);
+}
+
+.room-card:hover .room-card-suit {
+  transform: scale(1.25) rotate(-6deg);
 }
 
 .room-card-suit {
   font-size: 1.4rem;
   color: var(--gold-strong);
   opacity: 0.85;
+  transition: transform 0.25s ease;
+  display: inline-block;
 }
 
 .room-card-name {
@@ -1610,7 +1705,10 @@ label {
 }
 
 .private-table-link {
+  position: relative;
+  z-index: 1;
   margin-top: 26px;
+  animation: fadeInUp 0.6s ease 0.56s both;
 }
 
 .room-view-header {
