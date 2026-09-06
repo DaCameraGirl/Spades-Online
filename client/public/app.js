@@ -7,6 +7,10 @@ if (!sessionToken) {
   window.localStorage.setItem(SESSION_STORAGE_KEY, sessionToken);
 }
 
+const ACCOUNT_TOKEN_KEY = 'spades.accountToken';
+let accountToken = window.localStorage.getItem(ACCOUNT_TOKEN_KEY);
+let currentPlayer = null;
+
 const socket = io({
   transports: ['websocket', 'polling'],
   reconnection: true,
@@ -14,10 +18,22 @@ const socket = io({
   auth: { sessionToken },
 });
 
+const authGateSection = document.getElementById('authGate');
 const roomSelectSection = document.getElementById('roomSelect');
 const roomViewSection = document.getElementById('roomView');
 const lobbySection = document.getElementById('lobby');
 const tableSection = document.getElementById('table');
+const loginForm = document.getElementById('loginForm');
+const signupForm = document.getElementById('signupForm');
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const showSignupBtn = document.getElementById('showSignupBtn');
+const signupScreenName = document.getElementById('signupScreenName');
+const signupEmail = document.getElementById('signupEmail');
+const signupPassword = document.getElementById('signupPassword');
+const signupPasswordConfirm = document.getElementById('signupPasswordConfirm');
+const showLoginBtn = document.getElementById('showLoginBtn');
+const authErrorBox = document.getElementById('authErrorBox');
 const lobbyPlayerNameInput = document.getElementById('lobbyPlayerName');
 const roomCards = [...document.querySelectorAll('[data-lobby-room]')];
 const quickJoinBtn = document.getElementById('quickJoinBtn');
@@ -34,6 +50,10 @@ const chatInput = document.getElementById('chatInput');
 const chatSendBtn = document.getElementById('chatSendBtn');
 const lobbyErrorBox = document.getElementById('lobbyErrorBox');
 const statusBadge = document.getElementById('statusBadge');
+const accountChip = document.getElementById('accountChip');
+const accountScreenName = document.getElementById('accountScreenName');
+const accountRating = document.getElementById('accountRating');
+const logoutBtn = document.getElementById('logoutBtn');
 const roomCodeLabel = document.getElementById('roomCodeLabel');
 const stakeLabel = document.getElementById('stakeLabel');
 const errorBox = document.getElementById('errorBox');
@@ -281,13 +301,24 @@ function setLobbyError(message) {
   lobbyErrorBox.classList.remove('hidden');
 }
 
+function setAuthError(message) {
+  if (!message) {
+    authErrorBox.classList.add('hidden');
+    authErrorBox.textContent = '';
+    return;
+  }
+  authErrorBox.textContent = message;
+  authErrorBox.classList.remove('hidden');
+}
+
 function activatePanel(section) {
-  [roomSelectSection, roomViewSection, lobbySection, tableSection].forEach((panel) => {
+  [authGateSection, roomSelectSection, roomViewSection, lobbySection, tableSection].forEach((panel) => {
     panel.classList.toggle('active', panel === section);
   });
   document.body.classList.toggle('game-active', section === tableSection);
   document.body.classList.toggle('room-browsing', section === roomViewSection);
   document.body.classList.toggle('room-select-active', section === roomSelectSection);
+  document.body.classList.toggle('auth-gate-active', section === authGateSection);
 }
 
 function showRoomSelect() {
@@ -295,11 +326,127 @@ function showRoomSelect() {
   refreshLobbyOverview();
 }
 
-// The opening screen is marked active directly in the HTML so it renders
-// before any script runs, but that means activatePanel() never ran for it,
-// so the body never picked up the layout class that keeps it full-height.
-// Sync body state to whichever panel the static markup already shows.
-activatePanel(roomSelectSection);
+function showAuthGate() {
+  activatePanel(authGateSection);
+}
+
+function applyCurrentPlayer(player) {
+  currentPlayer = player;
+  lobbyPlayerNameInput.value = player.screenName;
+  lobbyPlayerNameInput.readOnly = true;
+  playerNameInput.value = player.screenName;
+  playerNameInput.readOnly = true;
+  accountScreenName.textContent = player.screenName;
+  accountRating.textContent = `${player.eloRating}`;
+  accountChip.classList.remove('hidden');
+}
+
+function clearCurrentPlayer() {
+  currentPlayer = null;
+  accountToken = null;
+  window.localStorage.removeItem(ACCOUNT_TOKEN_KEY);
+  accountChip.classList.add('hidden');
+  lobbyPlayerNameInput.readOnly = false;
+  playerNameInput.readOnly = false;
+}
+
+async function bootstrapAuth() {
+  if (!accountToken) {
+    showAuthGate();
+    return;
+  }
+  try {
+    const res = await fetch('/api/me', { headers: { Authorization: `Bearer ${accountToken}` } });
+    if (!res.ok) throw new Error('session invalid');
+    const { player } = await res.json();
+    applyCurrentPlayer(player);
+    showRoomSelect();
+  } catch {
+    clearCurrentPlayer();
+    showAuthGate();
+  }
+}
+
+bootstrapAuth();
+
+showSignupBtn.addEventListener('click', () => {
+  setAuthError('');
+  loginForm.classList.add('hidden');
+  signupForm.classList.remove('hidden');
+});
+
+showLoginBtn.addEventListener('click', () => {
+  setAuthError('');
+  signupForm.classList.add('hidden');
+  loginForm.classList.remove('hidden');
+});
+
+loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setAuthError('');
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: loginEmail.value, password: loginPassword.value }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setAuthError(json.message || 'Could not log in.');
+      return;
+    }
+    accountToken = json.token;
+    window.localStorage.setItem(ACCOUNT_TOKEN_KEY, accountToken);
+    applyCurrentPlayer(json.player);
+    loginPassword.value = '';
+    showRoomSelect();
+  } catch {
+    setAuthError('Could not reach the server, try again.');
+  }
+});
+
+signupForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setAuthError('');
+  try {
+    const res = await fetch('/api/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        screenName: signupScreenName.value,
+        email: signupEmail.value,
+        password: signupPassword.value,
+        passwordConfirm: signupPasswordConfirm.value,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setAuthError(json.message || 'Could not create your account.');
+      return;
+    }
+    accountToken = json.token;
+    window.localStorage.setItem(ACCOUNT_TOKEN_KEY, accountToken);
+    applyCurrentPlayer(json.player);
+    signupPassword.value = '';
+    signupPasswordConfirm.value = '';
+    showRoomSelect();
+  } catch {
+    setAuthError('Could not reach the server, try again.');
+  }
+});
+
+logoutBtn.addEventListener('click', async () => {
+  try {
+    await fetch('/api/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accountToken}` },
+    });
+  } catch {
+    // best-effort, we clear local state regardless
+  }
+  clearCurrentPlayer();
+  showAuthGate();
+});
 
 function showRoomView() {
   activatePanel(roomViewSection);

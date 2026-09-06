@@ -21,12 +21,57 @@
           <h1>Spades Online</h1>
         </div>
         <div class="header-actions">
+          <div id="accountChip" class="account-chip hidden">
+            <span id="accountScreenName" class="account-screen-name"></span>
+            <span id="accountRating" class="account-rating"></span>
+            <button id="logoutBtn" type="button" class="secondary account-logout-btn">Log out</button>
+          </div>
           <div id="statusBadge" class="status-badge">Offline</div>
         </div>
       </header>
 
       <main class="content">
-        <section id="roomSelect" class="panel active">
+        <section id="authGate" class="panel active auth-gate">
+          <h2>Sign in to play</h2>
+
+          <form id="loginForm" class="auth-form">
+            <label>
+              Email
+              <input id="loginEmail" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <input id="loginPassword" type="password" autocomplete="current-password" required />
+            </label>
+            <button id="loginBtn" type="submit" class="primary">Log In</button>
+            <button id="showSignupBtn" type="button" class="secondary auth-switch-btn">Need an account? Sign up</button>
+          </form>
+
+          <form id="signupForm" class="auth-form hidden">
+            <label>
+              Screen name
+              <input id="signupScreenName" type="text" maxlength="20" required />
+            </label>
+            <label>
+              Email
+              <input id="signupEmail" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <input id="signupPassword" type="password" autocomplete="new-password" required />
+            </label>
+            <label>
+              Confirm password
+              <input id="signupPasswordConfirm" type="password" autocomplete="new-password" required />
+            </label>
+            <button id="signupBtn" type="submit" class="primary">Create Account</button>
+            <button id="showLoginBtn" type="button" class="secondary auth-switch-btn">Already have an account? Log in</button>
+          </form>
+
+          <div id="authErrorBox" class="error-box hidden"></div>
+        </section>
+
+        <section id="roomSelect" class="panel">
           <div class="marquee-sweep" aria-hidden="true"></div>
           <div class="hero-cards" aria-hidden="true">
             <div class="hero-card hc-1"><span class="hc-corner">A<br>&spades;</span><span class="hc-center">&spades;</span><span class="hc-corner hc-corner-bottom">A<br>&spades;</span></div>
