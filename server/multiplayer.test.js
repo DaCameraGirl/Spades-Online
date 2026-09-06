@@ -484,7 +484,7 @@ test('lobby table: joining a numbered table seats the player and updates occupan
 
   const updated = await waitState(watcherLobby, (state) => state.tables[11].seatedCount === 1);
   assert.equal(updated.tables[11].tableNumber, 12);
-  assert.deepEqual(updated.tables[11].names, ['Solo']);
+  assert.deepEqual(updated.tables[11].seats, ['Solo', null, null, null]);
 });
 
 test('lobby table: a fifth arrival at a full table becomes a spectator instead of being rejected', async (t) => {
@@ -711,6 +711,90 @@ test('turn timer: a player who lets their turn expire is benched to a spectator 
   assert.equal(updated.players[timedOutSeat].connected, true, 'a bot takes over the abandoned seat');
   assert.equal(await timedOutError, 'You timed out and were moved to spectating.');
   await waitState(states[timedOutSeat], (state) => state.isSpectator === true, 3000, 'the timed-out player becomes a spectator at their own table');
+});
+
+test('watchSeat: a spectator can attach to a specific player, visible in that player\'s watcher list', async (t) => {
+  const tokens = ['watch-1', 'watch-2', 'watch-3', 'watch-4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 6, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await Promise.all(sockets.map((seatSocket) => waitFor(seatSocket, 'roomState', (payload) => payload.players.filter(Boolean).length === 4)));
+
+  const watcher = await connect(sharedPort, 'watch-spectator');
+  const watcherState = createState(watcher);
+  t.after(() => closeSocket(watcher));
+  watcher.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 6, name: 'Watcher', watchSeat: 1 });
+  await waitState(watcherState, (state) => state.isSpectator === true);
+
+  await waitState(states[1], (state) => state.players[1].watchers.some((watcherEntry) => watcherEntry.name === 'Watcher'));
+});
+
+test('watchSeat: only the watched player can remove their own watcher', async (t) => {
+  const tokens = ['boot-1', 'boot-2', 'boot-3', 'boot-4'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 6, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await Promise.all(sockets.map((seatSocket) => waitFor(seatSocket, 'roomState', (payload) => payload.players.filter(Boolean).length === 4)));
+
+  const watcher = await connect(sharedPort, 'boot-spectator');
+  const watcherState = createState(watcher);
+  t.after(() => closeSocket(watcher));
+  watcher.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 6, name: 'Watcher', watchSeat: 2 });
+  await waitState(watcherState, (state) => state.isSpectator === true);
+
+  const seat2State = await waitState(states[2], (state) => state.players[2].watchers.length === 1);
+  const watcherId = seat2State.players[2].watchers[0].id;
+
+  const wrongPlayerError = waitFor(sockets[0], 'errorMessage');
+  sockets[0].emit('removeWatcher', { roomCode: seat2State.roomCode, watcherId });
+  assert.equal(await wrongPlayerError, 'You can only remove someone watching your own seat.');
+
+  const bootedError = waitFor(watcher, 'errorMessage');
+  sockets[2].emit('removeWatcher', { roomCode: seat2State.roomCode, watcherId });
+  assert.equal(await bootedError, 'The player you were watching removed you from the table.');
+  await waitState(states[2], (state) => state.players[2].watchers.length === 0);
+});
+
+test('rankMode: a lobby table defaults to standard ace-high rules', async (t) => {
+  const solo = await connect(sharedPort, 'rankmode-default-solo');
+  const soloState = createState(solo);
+  t.after(() => closeSocket(solo));
+  solo.emit('joinTable', { lobbyRoomId: 'beginner', tableNumber: 22, name: 'Solo' });
+  const seated = await waitState(soloState, (state) => state.players.some((seat) => seat && seat.isYou));
+  assert.equal(seated.rankMode, 'ace', 'tables default to standard rules unless the host opts into 2s high');
+});
+
+test('rankMode: the host can switch to 2s high before the hand starts, and a non-host cannot', async (t) => {
+  const tokens = ['rankmode-host', 'rankmode-guest'];
+  const sockets = [];
+  const states = [];
+  for (const token of tokens) {
+    const seatSocket = await connect(sharedPort, token);
+    sockets.push(seatSocket);
+    states.push(createState(seatSocket));
+    seatSocket.emit('joinTable', { lobbyRoomId: 'advance', tableNumber: 22, name: token });
+  }
+  t.after(() => sockets.forEach(closeSocket));
+  await waitState(states[1], (state) => state.players.filter(Boolean).length === 2);
+
+  const guestError = waitFor(sockets[1], 'errorMessage');
+  sockets[1].emit('setRankMode', { roomCode: states[0]().roomCode, rankMode: 'deuces' });
+  assert.equal(await guestError, 'Only the host can change the game style.');
+
+  sockets[0].emit('setRankMode', { roomCode: states[0]().roomCode, rankMode: 'deuces' });
+  await waitState(states[0], (state) => state.rankMode === 'deuces');
 });
 
 test('lobby table: the hand auto-starts once four humans are seated, no host action needed', async (t) => {

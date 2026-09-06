@@ -37,6 +37,8 @@ const errorBox = document.getElementById('errorBox');
 const roomCodeInput = document.getElementById('roomCodeInput');
 const playerNameInput = document.getElementById('playerName');
 const stakeSelect = document.getElementById('stakeSelect');
+const createRankModeSelect = document.getElementById('createRankModeSelect');
+const rankModeSelect = document.getElementById('rankModeSelect');
 const tableStyleSelect = document.getElementById('tableStyleSelect');
 const createRoomBtn = document.getElementById('createRoomBtn');
 const joinRoomBtn = document.getElementById('joinRoomBtn');
@@ -400,6 +402,7 @@ function renderSeats() {
     const initials = player.isBot ? 'AI' : escapeHtml(playerInitials(player.name));
     const canVoteKick = mySeat != null && !player.isYou && !player.isBot;
     const votes = player.votesAgainst || 0;
+    const watchers = player.isYou ? (player.watchers || []) : [];
 
     seatCard.innerHTML = `
       <div class="seat-medallion" aria-hidden="true">${initials}</div>
@@ -412,6 +415,9 @@ function renderSeats() {
       </div>
       <span class="seat-badge">${badge}</span>
       ${canVoteKick ? `<button type="button" class="vote-kick-btn" title="Vote to kick">Vote kick${votes ? ` (${votes}/2)` : ''}</button>` : ''}
+      ${watchers.length ? `<div class="watcher-list">${watchers.map((watcherEntry) => `
+        <span class="watcher-chip">${escapeHtml(watcherEntry.name)}<button type="button" class="watcher-boot-btn" data-watcher-id="${watcherEntry.id}" title="Remove watcher">&times;</button></span>
+      `).join('')}</div>` : ''}
     `;
 
     if (canVoteKick) {
@@ -419,6 +425,12 @@ function renderSeats() {
         socket.emit('voteKick', { roomCode: roomState.roomCode, targetSeat: seatIndex });
       });
     }
+
+    seatCard.querySelectorAll('.watcher-boot-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        socket.emit('removeWatcher', { roomCode: roomState.roomCode, watcherId: btn.dataset.watcherId });
+      });
+    });
 
     tableSeats.appendChild(seatCard);
   });
@@ -501,15 +513,17 @@ function renderScores() {
   handMeterFillEl.style.width = `${Math.max(8, (tricksLeft / 13) * 100)}%`;
 }
 
-function joinTable(tableNumber) {
+function joinTable(tableNumber, watchSeat) {
   if (window.SpadesAudio) SpadesAudio.unlock();
   const name = lobbyPlayerNameInput.value.trim() || 'Player';
-  socket.emit('joinTable', { lobbyRoomId: currentLobbyRoomId, tableNumber, name });
+  const payload = { lobbyRoomId: currentLobbyRoomId, tableNumber, name };
+  if (typeof watchSeat === 'number') payload.watchSeat = watchSeat;
+  socket.emit('joinTable', payload);
 }
 
-function tileSeatMarkup(name, position, locked) {
+function tileSeatMarkup(name, seatIndex, position, locked) {
   if (name) {
-    return `<span class="tile-seat ${position} tile-seat-filled" title="${escapeHtml(name)}">${escapeHtml(playerInitials(name))}</span>`;
+    return `<button type="button" class="tile-seat ${position} tile-seat-filled" data-watch-seat="${seatIndex}" title="Watch ${escapeHtml(name)}">${escapeHtml(playerInitials(name))}</button>`;
   }
   if (locked) {
     return `<span class="tile-seat ${position} tile-seat-locked" title="Table locked">&#128274;</span>`;
@@ -527,16 +541,16 @@ function renderTableGrid(tables) {
     if (isFull) tile.classList.add('table-full');
     if (isLocked) tile.classList.add('table-locked');
 
-    const [south, west, north, east] = table.names;
+    const [south, west, north, east] = table.seats;
 
     tile.innerHTML = `
       <span class="table-tile-number">Table ${table.tableNumber}${isLocked ? ' &#128274;' : ''}</span>
       <div class="tile-felt">
-        ${tileSeatMarkup(north, 'seat-n', isLocked)}
-        ${tileSeatMarkup(west, 'seat-w', isLocked)}
+        ${tileSeatMarkup(north, 2, 'seat-n', isLocked)}
+        ${tileSeatMarkup(west, 1, 'seat-w', isLocked)}
         <span class="tile-deck" aria-hidden="true"></span>
-        ${tileSeatMarkup(east, 'seat-e', isLocked)}
-        ${tileSeatMarkup(south, 'seat-s', isLocked)}
+        ${tileSeatMarkup(east, 3, 'seat-e', isLocked)}
+        ${tileSeatMarkup(south, 0, 'seat-s', isLocked)}
       </div>
       <span class="table-tile-occupancy">${table.seatedCount}/4${table.spectatorCount ? ` &middot; ${table.spectatorCount} watching` : ''}</span>
     `;
@@ -545,13 +559,9 @@ function renderTableGrid(tables) {
       tile.querySelectorAll('.tile-seat-open').forEach((seatBtn) => {
         seatBtn.addEventListener('click', () => joinTable(table.tableNumber));
       });
-
-      if (isFull) {
-        const felt = tile.querySelector('.tile-felt');
-        felt.classList.add('tile-felt-watchable');
-        felt.title = 'Watch this table';
-        felt.addEventListener('click', () => joinTable(table.tableNumber));
-      }
+      tile.querySelectorAll('.tile-seat-filled').forEach((seatBtn) => {
+        seatBtn.addEventListener('click', () => joinTable(table.tableNumber, Number(seatBtn.dataset.watchSeat)));
+      });
     }
 
     tableGrid.appendChild(tile);
@@ -591,6 +601,11 @@ function render() {
   turnTimerSelect.disabled = !roomState.isHost;
   if (document.activeElement !== turnTimerSelect) {
     turnTimerSelect.value = String(roomState.turnTimerSeconds || 0);
+  }
+  const canChangeRankMode = roomState.isHost && (!roomState.game || roomState.game.phase === 'finished');
+  rankModeSelect.disabled = !canChangeRankMode;
+  if (document.activeElement !== rankModeSelect) {
+    rankModeSelect.value = roomState.rankMode || 'ace';
   }
   stakeLabel.textContent = roomState.stake || '250';
   if (potValueEl) {
@@ -694,6 +709,8 @@ socket.on('lobbyChatMessage', (message) => {
 socket.on('errorMessage', (message) => {
   if (roomViewSection.classList.contains('active') || roomSelectSection.classList.contains('active')) {
     setLobbyError(message);
+  } else if (tableSection.classList.contains('active')) {
+    showTableCall(message);
   } else {
     setError(message);
   }
@@ -739,8 +756,14 @@ createRoomBtn.addEventListener('click', () => {
   if (window.SpadesAudio) SpadesAudio.unlock();
   const name = playerNameInput.value.trim() || 'Host';
   const stake = Number(stakeSelect.value);
-  socket.emit('createRoom', { name, stake, sessionToken });
+  const rankMode = createRankModeSelect.value;
+  socket.emit('createRoom', { name, stake, rankMode, sessionToken });
   setError('');
+});
+
+rankModeSelect.addEventListener('change', () => {
+  if (!roomState || !roomState.roomCode) return;
+  socket.emit('setRankMode', { roomCode: roomState.roomCode, rankMode: rankModeSelect.value });
 });
 
 joinRoomBtn.addEventListener('click', () => {

@@ -69,7 +69,7 @@ function seedLobbyTables() {
         tableNumber,
         isPrivate: false,
         stake: STAKES[0],
-        rankMode: 'deuces',
+        rankMode: 'ace',
         status: 'lobby',
         hostSocketId: null,
         hostSessionToken: null,
@@ -93,7 +93,7 @@ function lobbyTableSummary(lobbyRoomId) {
       stake: table.stake,
       seatedCount: table.players.filter(Boolean).length,
       spectatorCount: (table.spectators || []).length,
-      names: table.players.filter(Boolean).map((player) => player.name),
+      seats: table.players.map((player) => (player ? player.name : null)),
       inProgress: Boolean(table.game && table.game.phase !== 'finished'),
       locked: Boolean(table.locked),
     });
@@ -124,9 +124,14 @@ function leaveAllLobbies(socket) {
   broadcastLobby(current);
 }
 
-function addSpectator(room, socketId, name) {
+function addSpectator(room, socketId, name, watchingSeat = null) {
   room.spectators = room.spectators || [];
-  room.spectators.push({ socketId, name: name || 'Guest' });
+  room.spectators.push({
+    id: `spec-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    socketId,
+    name: name || 'Guest',
+    watchingSeat: Number.isInteger(watchingSeat) ? watchingSeat : null,
+  });
 }
 
 function removeSpectatorBySocket(room, socketId) {
@@ -292,7 +297,7 @@ function createRoom() {
     id: `${Date.now()}`,
     code: roomCode,
     stake: STAKES[0],
-    rankMode: 'deuces',
+    rankMode: 'ace',
     status: 'lobby',
     hostSocketId: null,
     hostSessionToken: null,
@@ -691,6 +696,9 @@ function buildPlayerPayload(room, socketId) {
       tricks: room.game && room.game.tricksBySeat ? room.game.tricksBySeat[player.seat] || 0 : 0,
       team: teamForSeat(player.seat),
       votesAgainst: room.kickVotes && room.kickVotes.get(player.seat) ? room.kickVotes.get(player.seat).size : 0,
+      watchers: (room.spectators || [])
+        .filter((spectator) => spectator.watchingSeat === player.seat)
+        .map((spectator) => ({ id: spectator.id, name: spectator.name })),
     };
   });
 
@@ -807,7 +815,7 @@ io.on('connection', (socket) => {
     io.to(lobbyChannel(lobbyRoomId)).emit('lobbyChatMessage', message);
   });
 
-  socket.on('joinTable', ({ lobbyRoomId, tableNumber, name }) => {
+  socket.on('joinTable', ({ lobbyRoomId, tableNumber, name, watchSeat }) => {
     const table = getLobbyTable(lobbyRoomId, tableNumber);
     if (!table) {
       socket.emit('errorMessage', 'Table not found.');
@@ -835,6 +843,15 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const requestedWatchSeat = Number.isInteger(watchSeat) && table.players[watchSeat] ? watchSeat : null;
+    if (requestedWatchSeat !== null) {
+      socket.join(table.code);
+      socket.data.roomCode = table.code;
+      addSpectator(table, socket.id, name || 'Guest', requestedWatchSeat);
+      broadcastRoom(table);
+      return;
+    }
+
     const wasEmpty = table.players.every((player) => !player) && !(table.spectators || []).length;
     const seated = seatPlayer(table, socket.id, name || 'Player', sessionToken);
     socket.join(table.code);
@@ -855,6 +872,28 @@ io.on('connection', (socket) => {
 
     addSpectator(table, socket.id, name || 'Guest');
     broadcastRoom(table);
+  });
+
+  socket.on('removeWatcher', ({ roomCode, watcherId }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    const requester = getPlayerInRoom(room, socket.id);
+    if (!requester) return;
+
+    const spectator = (room.spectators || []).find((entry) => entry.id === watcherId);
+    if (!spectator || spectator.watchingSeat !== requester.seat) {
+      socket.emit('errorMessage', 'You can only remove someone watching your own seat.');
+      return;
+    }
+
+    const watcherSocket = io.sockets.sockets.get(spectator.socketId);
+    removeSpectatorBySocket(room, spectator.socketId);
+    if (watcherSocket) {
+      watcherSocket.leave(room.code);
+      watcherSocket.data.roomCode = null;
+      watcherSocket.emit('errorMessage', 'The player you were watching removed you from the table.');
+    }
+    broadcastRoom(room);
   });
 
   socket.on('leaveTable', ({ roomCode }) => {
@@ -928,6 +967,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('setRankMode', ({ roomCode, rankMode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    if (room.hostSocketId !== socket.id) {
+      socket.emit('errorMessage', 'Only the host can change the game style.');
+      return;
+    }
+    if (room.game && room.game.phase !== 'finished') {
+      socket.emit('errorMessage', 'Finish the current hand before changing the game style.');
+      return;
+    }
+    room.rankMode = rankMode === 'deuces' ? 'deuces' : 'ace';
+    broadcastRoom(room);
+  });
+
   socket.on('setTurnTimer', ({ roomCode, seconds }) => {
     const room = getRoomByCode(roomCode);
     if (!room) return;
@@ -960,7 +1014,7 @@ io.on('connection', (socket) => {
     }
     const room = createRoom();
     room.stake = STAKES.includes(Number(stake)) ? Number(stake) : STAKES[0];
-    room.rankMode = rankMode === 'ace' ? 'ace' : 'deuces';
+    room.rankMode = rankMode === 'deuces' ? 'deuces' : 'ace';
     room.hostSessionToken = sessionToken;
     room.hostSocketId = socket.id;
     seatPlayer(room, socket.id, name || 'Host', sessionToken);

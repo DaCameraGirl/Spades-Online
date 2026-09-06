@@ -957,6 +957,42 @@ label {
 .is-you .seat-badge { color: var(--teal); border-color: rgba(99, 208, 196, 0.34); }
 .partner-seat .seat-badge { color: var(--green); border-color: rgba(125, 204, 166, 0.32); }
 
+.watcher-list {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.watcher-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 7px;
+  border-radius: 999px;
+  background: rgba(99, 208, 196, 0.14);
+  border: 1px solid rgba(99, 208, 196, 0.35);
+  color: var(--teal);
+  font-size: 9px;
+}
+
+.watcher-boot-btn {
+  min-height: 0;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--teal);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.watcher-boot-btn:hover {
+  background: rgba(99, 208, 196, 0.25);
+  transform: none;
+  box-shadow: none;
+}
+
 .vote-kick-btn {
   grid-column: 2;
   justify-self: start;
@@ -1400,14 +1436,6 @@ label {
     0 8px 16px rgba(0, 0, 0, 0.4);
 }
 
-.tile-felt-watchable {
-  cursor: pointer;
-}
-
-.tile-felt-watchable:hover {
-  filter: brightness(1.15);
-}
-
 .tile-seat {
   position: absolute;
   width: 26px;
@@ -1425,10 +1453,19 @@ label {
 .tile-seat.seat-w { left: -12px; top: 50%; transform: translateY(-50%); }
 .tile-seat.seat-e { right: -12px; top: 50%; transform: translateY(-50%); }
 
-.tile-seat-filled {
+button.tile-seat-filled {
+  min-height: 0;
+  padding: 0;
+  cursor: pointer;
   background: radial-gradient(circle at 33% 25%, #fff4c0, #e6b84e 48%, #91651e 100%);
   color: #201300;
   border: 1px solid rgba(255, 239, 186, 0.75);
+}
+
+button.tile-seat-filled:hover {
+  transform: none;
+  box-shadow: none;
+  filter: brightness(1.1);
 }
 
 .tile-seat-locked {
