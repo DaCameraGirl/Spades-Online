@@ -1,9 +1,11 @@
+require('dotenv').config();
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { io } = require('socket.io-client');
 
 const ROOT = path.join(__dirname, '..');
@@ -192,6 +194,8 @@ before(async () => {
 after(async () => {
   for (const socket of [...openSockets]) closeSocket(socket);
   if (sharedServer) await stopServer(sharedServer);
+  const { pool } = require('./db');
+  await pool.end();
 });
 
 test('lobby: host creates room, three humans join in order, a fifth is rejected once full', async (t) => {
@@ -954,6 +958,170 @@ test('match: the match ends once a team reaches the stake target, instead of dea
   const dealError = waitFor(host, 'errorMessage');
   host.emit('nextHand', { roomCode });
   assert.equal(await dealError, 'The match is over. Start a new game to keep playing.');
+});
+
+test('rated match: a real match played to completion by 4 authenticated accounts awards Elo, a bot-filled match does not', async (t) => {
+  const { query } = require('./db');
+  const createdPlayerIds = [];
+  t.after(async () => {
+    if (createdPlayerIds.length) {
+      await query('delete from rated_matches where team_a_player1 = any($1::uuid[]) or team_b_player1 = any($1::uuid[])', [createdPlayerIds]);
+      await query('delete from players where id = any($1::uuid[])', [createdPlayerIds]);
+    }
+  });
+
+  const httpBase = `http://127.0.0.1:${sharedPort}`;
+  async function signup(prefix) {
+    const suffix = crypto.randomBytes(4).toString('hex');
+    const res = await fetch(`${httpBase}/api/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        screenName: `${prefix}${suffix}`,
+        email: `${prefix}${suffix}@example.com`,
+        password: 'correct-horse',
+        passwordConfirm: 'correct-horse',
+      }),
+    });
+    const json = await res.json();
+    createdPlayerIds.push(json.player.id);
+    return json;
+  }
+
+  const accounts = await Promise.all([
+    signup('rated-a1-'), signup('rated-a2-'), signup('rated-b1-'), signup('rated-b2-'),
+  ]);
+
+  const sockets = await Promise.all(accounts.map((_, i) => connect(sharedPort, `rated-match-${i}`)));
+  t.after(() => sockets.forEach(closeSocket));
+  const states = sockets.map((socket) => createState(socket));
+
+  sockets[0].emit('createRoom', { name: accounts[0].player.screenName, stake: 250, rankMode: 'ace', accountToken: accounts[0].token });
+  const created = await waitFor(sockets[0], 'roomState', (payload) => payload.roomCode);
+  const roomCode = created.roomCode;
+
+  for (let i = 1; i < 4; i += 1) {
+    sockets[i].emit('joinRoom', { code: roomCode, name: accounts[i].player.screenName, accountToken: accounts[i].token });
+  }
+  await Promise.all(states.map((getState) => waitState(getState, (state) => state.players.filter(Boolean).length === 4, 5000, 'all 4 accounts seated')));
+
+  sockets[0].emit('startGame', { roomCode });
+  await Promise.all(states.map((getState) => waitState(getState, (state) => state.game && state.game.phase === 'bidding', 5000, 'first hand dealt')));
+
+  let matchOver = false;
+  let safety = 0;
+  while (!matchOver && safety < 2000) {
+    safety += 1;
+    for (let seat = 0; seat < 4; seat += 1) {
+      const state = states[seat]();
+      if (!state || !state.game) continue;
+      if (state.game.matchOver) { matchOver = true; break; }
+      const me = state.players.find((player) => player.isYou);
+      if (!me) continue;
+
+      if (state.game.phase === 'bidding' && state.game.currentSeat === me.seat && me.bid == null) {
+        sockets[seat].emit('submitBid', { roomCode, bid: 3 });
+      } else if (state.game.phase === 'playing' && !state.game.resolving && state.game.currentSeat === me.seat) {
+        const card = playableCard(me.hand, state.game);
+        if (card) sockets[seat].emit('playCard', { roomCode, cardCode: card.code });
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+
+  assert.equal(matchOver, true, 'the 4-account match reached completion within the safety bound');
+
+  // The award is fire-and-forget from the server's point of view, poll for
+  // the write instead of a fixed sleep, timing varies under full-suite load.
+  let ratedRow = { rowCount: 0 };
+  const pollDeadline = Date.now() + 8000;
+  while (ratedRow.rowCount === 0 && Date.now() < pollDeadline) {
+    ratedRow = await query(
+      'select * from rated_matches where team_a_player1 = $1 or team_a_player2 = $1 or team_b_player1 = $1 or team_b_player2 = $1',
+      [accounts[0].player.id],
+    );
+    if (ratedRow.rowCount === 0) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(ratedRow.rowCount, 1, 'exactly one rated_matches row was recorded for this match');
+
+  const playersAfter = await query(
+    'select id, elo_rating as "eloRating", wins, losses, games_played as "gamesPlayed" from players where id = any($1::uuid[])',
+    [accounts.map((a) => a.player.id)],
+  );
+  playersAfter.rows.forEach((row) => {
+    assert.equal(row.gamesPlayed, 1);
+    assert.equal(row.wins + row.losses, 1);
+    assert.notEqual(row.eloRating, 1500, 'rating actually moved from the 1500 starting point');
+  });
+
+  const totalDelta = playersAfter.rows.reduce((sum, row) => sum + (row.eloRating - 1500), 0);
+  assert.equal(totalDelta, 0, 'the four accounts\' rating changes are zero-sum');
+});
+
+test('rated match: a match with a bot in one seat never awards Elo', async (t) => {
+  const { query } = require('./db');
+  const createdPlayerIds = [];
+  t.after(async () => {
+    if (createdPlayerIds.length) await query('delete from players where id = any($1::uuid[])', [createdPlayerIds]);
+  });
+
+  const httpBase = `http://127.0.0.1:${sharedPort}`;
+  const suffix = crypto.randomBytes(4).toString('hex');
+  const signupRes = await fetch(`${httpBase}/api/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      screenName: `solo-rated-${suffix}`,
+      email: `solo-rated-${suffix}@example.com`,
+      password: 'correct-horse',
+      passwordConfirm: 'correct-horse',
+    }),
+  });
+  const account = await signupRes.json();
+  createdPlayerIds.push(account.player.id);
+
+  const host = await connect(sharedPort, `solo-rated-${suffix}`);
+  const hostState = createState(host);
+  t.after(() => closeSocket(host));
+
+  host.emit('createRoom', { name: account.player.screenName, stake: 250, rankMode: 'ace', accountToken: account.token });
+  const created = await waitFor(host, 'roomState', (payload) => payload.roomCode);
+  const roomCode = created.roomCode;
+
+  host.emit('startGame', { roomCode });
+  let state = await waitState(hostState, (payload) => payload.game && payload.game.phase === 'bidding', 5000, 'first hand dealt');
+
+  let safety = 0;
+  while (!state.game.matchOver && safety < 1200) {
+    safety += 1;
+    const me = state.players.find((player) => player.isYou);
+    if (state.game.phase === 'bidding') {
+      if (state.game.currentSeat === me.seat && me.bid == null) host.emit('submitBid', { roomCode, bid: 3 });
+      state = await waitState(hostState, (payload) => payload.game && (payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat), 5000, 'bid progress');
+      continue;
+    }
+    if (state.game.phase === 'playing') {
+      if (!state.game.resolving && state.game.currentSeat === me.seat) {
+        const card = playableCard(me.hand, state.game);
+        host.emit('playCard', { roomCode, cardCode: card.code });
+      }
+      state = await waitState(hostState, (payload) => payload.game && (payload.game.phase === 'finished' || payload.game.currentSeat !== state.game.currentSeat || Boolean(payload.game.resolving) !== Boolean(state.game.resolving)), 5000, 'play progress');
+      continue;
+    }
+    if (state.game.phase === 'finished') {
+      state = await waitState(hostState, (payload) => payload.game && (payload.game.matchOver || payload.game.phase === 'bidding'), 5000, 'next hand or match end');
+    }
+  }
+
+  assert.equal(state.game.matchOver, true);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  const playerAfter = await query(
+    'select elo_rating as "eloRating", games_played as "gamesPlayed" from players where id = $1',
+    [account.player.id],
+  );
+  assert.equal(playerAfter.rows[0].eloRating, 1500, 'a match with 3 bot seats never touches Elo');
+  assert.equal(playerAfter.rows[0].gamesPlayed, 0);
 });
 
 test('tableChat: a message broadcasts to everyone seated or spectating at that table', async (t) => {

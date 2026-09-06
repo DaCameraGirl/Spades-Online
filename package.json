@@ -9,14 +9,21 @@
     "dev": "node server/server.js",
     "test": "node --test server/*.test.js",
     "smoke": "node scripts/smoke.js",
-    "verify:ui": "node scripts/verify-ui.js"
+    "verify:ui": "node scripts/verify-ui.js",
+    "migrate": "node scripts/migrate.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
     "express": "^4.19.2",
+    "pg": "^8.23.0",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "puppeteer-core": "^24.43.1"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }
