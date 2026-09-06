@@ -164,6 +164,23 @@ test('session persistence: a session token keeps working across separate request
   assert.equal(me2Json.player.id, json.player.id);
 });
 
+test('session persistence: a session survives an actual server process restart, not just repeated requests to the same process', async () => {
+  const base1 = `http://127.0.0.1:${sharedPort}`;
+  const { json } = await signup(base1);
+
+  const restartedPort = randomPort(4600);
+  const restartedServer = await startServer(restartedPort);
+  try {
+    const base2 = `http://127.0.0.1:${restartedPort}`;
+    const me = await fetch(`${base2}/api/me`, { headers: { Authorization: `Bearer ${json.token}` } });
+    assert.equal(me.status, 200, 'the session token, issued by one process, is honored by a brand new process because it is stored in Postgres, not server memory');
+    const meJson = await me.json();
+    assert.equal(meJson.player.id, json.player.id);
+  } finally {
+    await stopServer(restartedServer);
+  }
+});
+
 test('logout: invalidates the session token', async () => {
   const base = `http://127.0.0.1:${sharedPort}`;
   const { json } = await signup(base);
