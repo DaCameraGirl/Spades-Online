@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { Server } = require('socket.io');
 const auth = require('./auth');
 const { recordRatedMatch } = require('./matches');
+const ownerCommands = require('./ownerCommands');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -494,6 +495,8 @@ function attachPlayer(room, player, socket) {
 // authenticated humans (no bots). Never blocks or throws into the game
 // loop, a rating-service hiccup should not be able to disrupt gameplay.
 function awardRatedMatch(room, winningTeam) {
+  if (room.game.cheatsUsed) return;
+
   const teamASeats = [0, 2];
   const teamBSeats = [1, 3];
   const allSeated = [...teamASeats, ...teamBSeats].every((seat) => {
@@ -720,6 +723,10 @@ function dealHand(room, { preserveScores = false } = {}) {
   const matchId = preserveScores && room.game && room.game.matchId
     ? room.game.matchId
     : crypto.randomUUID();
+  // Once an owner debug command touches a match it stays permanently
+  // unrated for every remaining hand of that same match, a new match
+  // (preserveScores: false) starts clean.
+  const cheatsUsed = preserveScores && room.game ? Boolean(room.game.cheatsUsed) : false;
 
   const deck = makeDeck();
   room.players.forEach((player, index) => {
@@ -746,6 +753,7 @@ function dealHand(room, { preserveScores = false } = {}) {
     message: 'Bidding is open. Choose Nil or bid from 1 to 13.',
     lastTrick: null,
     matchId,
+    cheatsUsed,
   };
 
   room.status = 'playing';
@@ -799,6 +807,7 @@ function buildPlayerPayload(room, socketId) {
       watchers: (room.spectators || [])
         .filter((spectator) => spectator.watchingSeat === player.seat)
         .map((spectator) => ({ id: spectator.id, name: spectator.name })),
+      crowned: room.crownedSeat === player.seat,
     };
   });
 
@@ -819,6 +828,7 @@ function buildPlayerPayload(room, socketId) {
         matchOver: Boolean(room.game.matchOver),
         matchWinner: room.game.matchWinner ?? null,
         lastTrick: room.game.lastTrick || null,
+        cheatsUsed: Boolean(room.game.cheatsUsed),
       }
     : null;
 
@@ -1121,6 +1131,50 @@ io.on('connection', (socket) => {
     persistRooms();
     broadcastRoom(room);
     if (room.game && room.status === 'playing' && !room.game.resolving) continueTurn(room);
+  });
+
+  // Owner-only debug/QA commands. Authorization is server-side, by the
+  // account UUID a valid session token actually resolves to, never by
+  // anything the client claims. An unauthorized attempt fails completely
+  // silently, no error message, nothing distinguishing it from a typo, so
+  // there is no signal to a non-owner that this even exists.
+  socket.on('ownerCommand', async ({ roomCode, command, accountToken }) => {
+    const accountPlayer = await resolveAccountPlayer(accountToken);
+    if (!ownerCommands.isOwner(accountPlayer)) return;
+
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+
+    const entry = ownerCommands.COMMANDS[command];
+    if (!entry) return;
+
+    const ownerSeat = ownerCommands.findOwnerSeat(room, accountPlayer);
+    if (entry.requiresSeat && ownerSeat === -1) {
+      socket.emit('ownerCommandResult', { command, ok: false, message: 'You are not seated at this table.' });
+      return;
+    }
+
+    const result = entry.fn(room, ownerSeat);
+    if (result.matchConverted) {
+      socket.emit('ownerCommandResult', {
+        command,
+        ok: true,
+        message: 'This match just converted to unranked test mode, gameplay-affecting owner commands permanently disable Elo for the rest of it.',
+      });
+    }
+    if (result.hands) {
+      socket.emit('ownerPeek', { hands: result.hands });
+    }
+    if (result.confetti) {
+      io.to(room.code).emit('celebrate');
+    }
+    socket.emit('ownerCommandResult', { command, ok: result.ok, message: result.message });
+
+    if (result.ok) {
+      persistRooms();
+      broadcastRoom(room);
+      if (room.game && room.status === 'playing' && !room.game.resolving) continueTurn(room);
+    }
   });
 
   socket.on('leaveTable', ({ roomCode }) => {
