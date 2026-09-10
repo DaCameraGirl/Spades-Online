@@ -252,6 +252,20 @@
               <div class="hud-row hud-row-settings">
                 <div class="hud-settings-group">
                   <button id="copyInviteBtn" type="button" class="invite-btn">Copy invite link</button>
+                  <button id="showQrBtn" type="button" class="invite-btn">QR invite</button>
+                  <div class="owner-menu-wrap hidden" id="ownerMenuWrap">
+                    <button id="ownerMenuBtn" type="button" class="owner-menu-btn" aria-haspopup="true" aria-expanded="false" title="Owner commands">Owner</button>
+                    <div id="ownerMenu" class="owner-menu hidden">
+                      <button type="button" data-owner-command="/peek">Peek</button>
+                      <button type="button" data-owner-command="/redeal">Redeal</button>
+                      <button type="button" data-owner-command="/oops">Oops</button>
+                      <button type="button" data-owner-command="/blessme">Bless Me</button>
+                      <button type="button" data-owner-command="/nitemare">Nitemare</button>
+                      <button type="button" data-owner-command="/crown">Crown</button>
+                      <button type="button" data-owner-command="/confetti">Confetti</button>
+                    </div>
+                  </div>
+                  <button id="standUpBtn" type="button" class="invite-btn">Stand Up</button>
                   <button id="lockTableBtn" type="button" class="invite-btn">Lock table</button>
                   <button id="leaveTableBtn" type="button" class="invite-btn">Leave table</button>
                   <button id="lastTrickBtn" type="button" class="invite-btn" disabled>Last trick</button>
@@ -259,10 +273,14 @@
                 </div>
 
                 <div class="hud-settings-group">
-                  <div class="stake-chip">
-                    <span>Stake</span>
-                    <strong id="stakeLabel">250</strong>
-                  </div>
+                  <label class="turn-timer-label">
+                    Stake
+                    <select id="tableStakeSelect">
+                      <option value="250">250</option>
+                      <option value="500">500</option>
+                      <option value="1000">1000</option>
+                    </select>
+                  </label>
                   <label class="turn-timer-label">
                     Game style
                     <select id="rankModeSelect">
@@ -276,7 +294,33 @@
                       <option value="0">Off</option>
                       <option value="15">15s</option>
                       <option value="30">30s</option>
+                      <option value="45">45s</option>
                       <option value="60">60s</option>
+                    </select>
+                  </label>
+                  <label class="table-option-toggle">
+                    <input id="allowNilToggle" type="checkbox" checked />
+                    <span>Nil</span>
+                  </label>
+                  <label class="table-option-toggle">
+                    <input id="lowClubLeadToggle" type="checkbox" />
+                    <span>Low club lead</span>
+                  </label>
+                  <label class="table-option-toggle">
+                    <input id="allowWatchersToggle" type="checkbox" checked />
+                    <span>Watchers</span>
+                  </label>
+                  <label class="turn-timer-label">
+                    Voice
+                    <select id="voiceSelect"><option value="auto">Auto voice</option></select>
+                  </label>
+                  <label class="turn-timer-label">
+                    Deck
+                    <select id="deckSelect">
+                      <option value="classic">Classic ivory</option>
+                      <option value="midnight">Midnight blue</option>
+                      <option value="ruby">Ruby casino</option>
+                      <option value="shiny">Shiny foil</option>
                     </select>
                   </label>
                 </div>
@@ -316,7 +360,7 @@
 
                   <div class="table-message">
                     <p id="gameMessage">Waiting for players.</p>
-                    <span>Turn: <strong id="turnLabel">&mdash;</strong></span>
+                    <span id="turnStatusLine">Turn: <strong id="turnLabel">&mdash;</strong> <strong id="turnCountdown" class="turn-countdown"></strong></span>
                   </div>
 
                   <div class="table-pit" aria-label="Cards in play">
@@ -327,6 +371,7 @@
                     <div class="pot-box">
                       <span>POT</span>
                       <strong id="potValue">$250</strong>
+                      <em id="contractLabel" class="contract-label"></em>
                     </div>
                   </div>
 
@@ -337,7 +382,21 @@
                   </div>
 
                   <div id="tableSeats" class="table-seats"></div>
+                  <div id="awayHostPanel" class="away-host-panel hidden">
+                    <strong id="awayHostTitle">WAITING FOR PLAYER</strong>
+                    <span id="awayHostText"></span>
+                    <div class="away-host-actions">
+                      <button id="awayAutoBtn" type="button" class="secondary">Continue With Auto-Play</button>
+                      <button id="awayWaitBtn" type="button" class="secondary">Wait For Player</button>
+                      <button id="resumeGameBtn" type="button" class="primary hidden">Resume Game</button>
+                    </div>
+                  </div>
                 </div>
+              </div>
+
+              <div id="blindBidRow" class="blind-bid-row hidden">
+                <button id="blindNilBtn" type="button" class="primary">Blind Nil</button>
+                <button id="viewHandBtn" type="button" class="secondary">View Hand</button>
               </div>
 
               <div class="bid-row">
@@ -376,6 +435,17 @@
                 </div>
               </div>
 
+              <div id="qrModal" class="last-trick-modal hidden">
+                <div class="last-trick-card-box qr-card-box">
+                  <div class="last-trick-header">
+                    <span>Table invite</span>
+                    <button id="qrCloseBtn" type="button" class="table-chat-close">&times;</button>
+                  </div>
+                  <img id="qrImage" class="qr-image" alt="QR code for table invite" />
+                  <p id="qrInviteText" class="qr-invite-text"></p>
+                </div>
+              </div>
+
               <div id="roomPeekModal" class="last-trick-modal hidden">
                 <div class="last-trick-card-box room-peek-box">
                   <div class="last-trick-header">
@@ -403,3 +473,6 @@
     <script src="/app.js"></script>
   </body>
 </html>
+
+
+

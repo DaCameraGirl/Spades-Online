@@ -176,6 +176,8 @@ async function startAndBid(sockets, states, roomCode) {
   for (let bids = 0; bids < 4; bids += 1) {
     const bidState = await waitState(states[0], (state) => state.game.phase === 'bidding');
     const seat = bidState.game.currentSeat;
+    sockets[seat].emit('viewHand', { roomCode });
+    await waitState(states[seat], (state) => state.players[seat] && state.players[seat].handRevealed === true);
     sockets[seat].emit('submitBid', { roomCode, bid: 2 });
     await waitState(states[0], (state) => state.players[seat] && state.players[seat].bid === 2);
   }
@@ -229,7 +231,13 @@ test('host can start with empty seats and bots fill the rest', async (t) => {
   assert.equal(state.players.filter(Boolean).length, 4);
   assert.equal(state.players.filter((player) => player.isBot).length, 3);
   const me = state.players.find((player) => player.isYou);
-  assert.equal(me.hand.length, 13);
+  assert.equal(me.hand.length, 0);
+  assert.equal(me.handRevealed, false);
+  const myTurn = await waitState(hostState, (payload) => payload.game.currentSeat === me.seat);
+  assert.equal(myTurn.players.find((player) => player.isYou).bid, null);
+  host.emit('viewHand', { roomCode: created.roomCode });
+  const revealed = await waitState(hostState, (payload) => payload.players.find((player) => player.isYou).hand.length === 13, 3000, 'host hand revealed');
+  assert.equal(revealed.players.find((player) => player.isYou).hand.length, 13);
 });
 
 test('four humans: private hands, bid sync, and card-play sync', async (t) => {
@@ -922,6 +930,7 @@ test('match: the match ends once a team reaches the stake target, instead of dea
 
     if (state.game.phase === 'bidding') {
       if (state.game.currentSeat === me.seat && me.bid == null) {
+        host.emit('viewHand', { roomCode });
         host.emit('submitBid', { roomCode, bid: 3 });
       }
       state = await waitState(hostState, (payload) => payload.game && (
@@ -1020,6 +1029,7 @@ test('rated match: a real match played to completion by 4 authenticated accounts
       if (!me) continue;
 
       if (state.game.phase === 'bidding' && state.game.currentSeat === me.seat && me.bid == null) {
+        sockets[seat].emit('viewHand', { roomCode });
         sockets[seat].emit('submitBid', { roomCode, bid: 3 });
       } else if (state.game.phase === 'playing' && !state.game.resolving && state.game.currentSeat === me.seat) {
         const card = playableCard(me.hand, state.game);
@@ -1096,7 +1106,8 @@ test('rated match: a match with a bot in one seat never awards Elo', async (t) =
     safety += 1;
     const me = state.players.find((player) => player.isYou);
     if (state.game.phase === 'bidding') {
-      if (state.game.currentSeat === me.seat && me.bid == null) host.emit('submitBid', { roomCode, bid: 3 });
+      if (state.game.currentSeat === me.seat && me.bid == null) host.emit('viewHand', { roomCode });
+        host.emit('submitBid', { roomCode, bid: 3 });
       state = await waitState(hostState, (payload) => payload.game && (payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat), 5000, 'bid progress');
       continue;
     }
@@ -1173,3 +1184,112 @@ test('lobby table: the hand auto-starts once four humans are seated, no host act
   t.after(() => sockets.forEach(closeSocket));
   await waitState(states[3], (state) => state.game && state.game.phase === 'bidding');
 });
+
+
+test('blind nil: selected before cards are viewed and survives reconnect', async (t) => {
+  const tokens = ['blind-host', 'blind-p2', 'blind-p3', 'blind-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  sockets[0].emit('startGame', { roomCode });
+  const bidding = await waitState(states[1], (state) => state.game && state.game.phase === 'bidding' && state.game.currentSeat === 1);
+  assert.equal(bidding.players[1].handRevealed, false);
+  assert.equal(bidding.players[1].hand.length, 0);
+
+  sockets[1].emit('submitBlindNil', { roomCode });
+  const blind = await waitState(states[1], (state) => state.players[1].blindNil === true && state.players[1].bid === 0);
+  assert.equal(blind.players[1].handRevealed, true);
+  assert.equal(blind.players[1].hand.length, 13);
+  assert.equal(blind.game.blindNil[1], true);
+
+  sockets[1].disconnect();
+  await waitState(states[0], (state) => state.players[1]?.connected === false);
+  const reconnected = await connect(sharedPort, tokens[1]);
+  sockets[1] = reconnected;
+  states[1] = createState(reconnected);
+  const recovered = await waitFor(reconnected, 'roomState', (state) => state.players[1]?.blindNil === true);
+  assert.equal(recovered.players[1].bid, 0);
+  assert.equal(recovered.players[1].hand.length, 13);
+});
+
+test('10 for 200: numeric team bids totaling 10 activate the team contract', async (t) => {
+  const tokens = ['ten-host', 'ten-p2', 'ten-p3', 'ten-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  sockets[0].emit('startGame', { roomCode });
+  await waitState(states[0], (state) => state.game && state.game.phase === 'bidding');
+  const bids = { 1: 2, 2: 4, 3: 2, 0: 6 };
+  for (let count = 0; count < 4; count += 1) {
+    const state = await waitState(states[0], (payload) => payload.game.phase === 'bidding');
+    const seat = state.game.currentSeat;
+    sockets[seat].emit('viewHand', { roomCode });
+    sockets[seat].emit('submitBid', { roomCode, bid: bids[seat] });
+    await waitState(states[0], (payload) => payload.players[seat].bid === bids[seat]);
+  }
+
+  const playing = await waitState(states[0], (state) => state.game.phase === 'playing');
+  assert.equal(playing.game.teamContracts[0].bid, 10);
+  assert.equal(playing.game.teamContracts[0].tenFor200, true);
+  assert.equal(playing.game.teamContracts[1].tenFor200, false);
+});
+
+test('away: host can continue with auto-play and the away seat acts', async (t) => {
+  const tokens = ['away-auto-host', 'away-auto-p2', 'away-auto-p3', 'away-auto-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  const playing = await startAndBid(sockets, states, roomCode);
+  const targetSeat = playing.game.currentSeat;
+  const handBefore = states[targetSeat]().players[targetSeat].hand.length;
+  sockets[targetSeat].emit('standUp', { roomCode });
+  await waitState(states[0], (state) => state.players[targetSeat].away === true);
+  sockets[0].emit('setAwayMode', { roomCode, seat: targetSeat, mode: 'auto' });
+
+  const advanced = await waitState(states[0], (state) => state.game.trick.length > 0 || state.game.currentSeat !== targetSeat, 5000, 'away auto-play action');
+  assert.equal(advanced.players[targetSeat].away, true);
+  assert.equal(advanced.players[targetSeat].autoPlayingAway, true);
+  assert.ok(advanced.game.trick.length > 0 || states[targetSeat]().players[targetSeat].hand.length < handBefore);
+
+  sockets[targetSeat].emit('sitBackDown', { roomCode });
+  const returned = await waitState(states[0], (state) => state.players[targetSeat].away === false);
+  assert.equal(returned.players[targetSeat].autoPlayingAway, false);
+});
+
+test('away: host can wait, timer pauses, and host resumes after return', async (t) => {
+  const tokens = ['away-wait-host', 'away-wait-p2', 'away-wait-p3', 'away-wait-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  sockets[0].emit('setTurnTimer', { roomCode, seconds: 15 });
+  const playing = await startAndBid(sockets, states, roomCode);
+  const targetSeat = playing.game.currentSeat;
+  sockets[targetSeat].emit('standUp', { roomCode });
+  sockets[0].emit('setAwayMode', { roomCode, seat: targetSeat, mode: 'wait' });
+
+  const paused = await waitState(states[0], (state) => state.game.paused === true && state.game.waitingForAwaySeat === targetSeat);
+  assert.equal(paused.game.turnDeadlineAt, null);
+
+  sockets[targetSeat].emit('sitBackDown', { roomCode });
+  await waitState(states[0], (state) => state.game.awaitingHostResume === true);
+  sockets[0].emit('resumeGame', { roomCode });
+  const resumed = await waitState(states[0], (state) => state.game.paused === false && state.game.awaitingHostResume === false);
+  assert.equal(resumed.game.currentSeat, targetSeat);
+});
+
+test('turn timer: deadline is broadcast and expiration auto-bids a legal action', async (t) => {
+  const tokens = ['timer-host', 'timer-p2', 'timer-p3', 'timer-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  sockets[0].emit('setTurnTimer', { roomCode, seconds: 1 });
+  await waitState(states[0], (state) => state.turnTimerSeconds === 1);
+  sockets[0].emit('startGame', { roomCode });
+  const armed = await waitState(states[0], (state) => state.game && state.game.phase === 'bidding' && state.game.turnDeadlineAt, 5000, 'timer deadline');
+  const timedSeat = armed.game.currentSeat;
+  assert.equal(typeof armed.game.turnDeadlineAt, 'number');
+
+  const autoBid = await waitState(states[0], (state) => state.players[timedSeat].bid !== null, 5000, 'timer auto-bid');
+  assert.equal(autoBid.players[timedSeat].handRevealed, true);
+});
+

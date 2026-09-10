@@ -54,7 +54,7 @@ function cmdPeek(room, ownerSeat) {
   return { ok: true, message: 'Peeked at all four hands.', hands, matchConverted: trip.justConverted };
 }
 
-function cmdRedeal(room) {
+function cmdRedeal(room, ownerSeat) {
   if (!room.game || room.game.phase !== 'bidding') {
     return { ok: false, message: 'Can only redeal before bidding starts.' };
   }
@@ -65,9 +65,10 @@ function cmdRedeal(room) {
 
   const trip = tripCheats(room);
   const deck = makeShuffledDeck();
-  room.players.forEach((player) => {
+  room.players.forEach((player, seat) => {
     if (!player) return;
     player.hand = sortHand(deck.splice(0, 13), room.rankMode);
+    if (seat === ownerSeat) player.handRevealed = true;
   });
   return { ok: true, message: 'Redealt the hand.', matchConverted: trip.justConverted };
 }
@@ -110,6 +111,7 @@ function cmdBlessMe(room, ownerSeat) {
   seats.forEach((entry) => {
     if (entry.seat === ownerSeat) {
       entry.player.hand = sortHand(ownerHand, room.rankMode);
+      entry.player.handRevealed = true;
     } else {
       entry.player.hand = sortHand(rest.splice(0, entry.player.hand.length), room.rankMode);
     }
@@ -148,3 +150,5 @@ const COMMANDS = {
 };
 
 module.exports = { isOwner, findOwnerSeat, COMMANDS, tripCheats };
+
+

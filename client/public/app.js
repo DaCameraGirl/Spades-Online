@@ -64,6 +64,10 @@ const errorBox = document.getElementById('errorBox');
 const roomCodeInput = document.getElementById('roomCodeInput');
 const playerNameInput = document.getElementById('playerName');
 const stakeSelect = document.getElementById('stakeSelect');
+const tableStakeSelect = document.getElementById('tableStakeSelect');
+const allowNilToggle = document.getElementById('allowNilToggle');
+const lowClubLeadToggle = document.getElementById('lowClubLeadToggle');
+const allowWatchersToggle = document.getElementById('allowWatchersToggle');
 const createRankModeSelect = document.getElementById('createRankModeSelect');
 const rankModeSelect = document.getElementById('rankModeSelect');
 const tableStyleSelect = document.getElementById('tableStyleSelect');
@@ -90,6 +94,30 @@ const tableChatSendBtn = document.getElementById('tableChatSendBtn');
 const tablePlayerList = document.getElementById('tablePlayerList');
 const tableWatcherList = document.getElementById('tableWatcherList');
 const turnTimerSelect = document.getElementById('turnTimerSelect');
+const turnCountdownEl = document.getElementById('turnCountdown');
+const turnStatusLine = document.getElementById('turnStatusLine');
+const voiceSelect = document.getElementById('voiceSelect');
+const deckSelect = document.getElementById('deckSelect');
+const showQrBtn = document.getElementById('showQrBtn');
+const ownerMenuWrap = document.getElementById('ownerMenuWrap');
+const ownerMenuBtn = document.getElementById('ownerMenuBtn');
+const ownerMenu = document.getElementById('ownerMenu');
+const qrModal = document.getElementById('qrModal');
+const qrCloseBtn = document.getElementById('qrCloseBtn');
+const qrImage = document.getElementById('qrImage');
+const qrInviteText = document.getElementById('qrInviteText');
+const standUpBtn = document.getElementById('standUpBtn');
+const blindBidRow = document.getElementById('blindBidRow');
+const normalBidRow = document.querySelector('.bid-row');
+const blindNilBtn = document.getElementById('blindNilBtn');
+const viewHandBtn = document.getElementById('viewHandBtn');
+const contractLabel = document.getElementById('contractLabel');
+const awayHostPanel = document.getElementById('awayHostPanel');
+const awayHostTitle = document.getElementById('awayHostTitle');
+const awayHostText = document.getElementById('awayHostText');
+const awayAutoBtn = document.getElementById('awayAutoBtn');
+const awayWaitBtn = document.getElementById('awayWaitBtn');
+const resumeGameBtn = document.getElementById('resumeGameBtn');
 const soundToggles = [...document.querySelectorAll('[data-sound-toggle]')];
 const tableCall = document.getElementById('tableCall');
 const bidSelect = document.getElementById('bidSelect');
@@ -127,6 +155,8 @@ let callTimer = null;
 let currentLobbyRoomId = null;
 let lastDealtRound = null;
 let quickJoinPending = false;
+let countdownInterval = null;
+const DECK_STORAGE_KEY = 'spades.deckStyle';
 
 const LOBBY_ROOM_LABELS = {
   beginner: 'Beginner Room',
@@ -583,7 +613,10 @@ function playerInitials(name) {
   return words.map((word) => word[0] || '').join('').toUpperCase() || 'P';
 }
 
-function formatBid(bid) {
+function formatBid(playerOrBid) {
+  const bid = typeof playerOrBid === 'object' && playerOrBid ? playerOrBid.bid : playerOrBid;
+  const blindNil = typeof playerOrBid === 'object' && playerOrBid ? playerOrBid.blindNil : false;
+  if (blindNil) return 'Blind Nil';
   if (bid === 0) return 'Nil';
   return bid ?? '&mdash;';
 }
@@ -633,19 +666,24 @@ function renderSeats() {
     const isDisconnected = !player.isBot && player.connected === false;
     const isPartner = partnerSeat === player.seat;
     if (isDisconnected) seatCard.classList.add('disconnected');
+    if (player.away) seatCard.classList.add('away-seat');
+    if (player.blindNil) seatCard.classList.add('blind-nil-seat');
+    if (player.bid === 0 && !player.blindNil) seatCard.classList.add('nil-seat');
     if (player.isYou) seatCard.classList.add('is-you');
     if (isPartner) seatCard.classList.add('partner-seat');
     if (player.isBot) seatCard.classList.add('bot-seat');
 
-    const badge = isDisconnected
-      ? 'Disconnected'
-      : player.isYou
-        ? 'You'
-        : isPartner
-          ? 'Partner'
-          : player.isBot
-            ? 'Bot'
-            : 'Player';
+    const badge = player.away
+      ? (player.autoPlayingAway ? 'AUTO-PLAYING' : 'AWAY')
+      : isDisconnected
+        ? 'Disconnected'
+        : player.isYou
+          ? 'You'
+          : isPartner
+            ? 'Partner'
+            : player.isBot
+              ? 'Bot'
+              : 'Player';
     const tricks = player.tricks ?? 0;
     const safeName = escapeHtml(player.name);
     const initials = player.isBot ? 'AI' : escapeHtml(playerInitials(player.name));
@@ -659,11 +697,12 @@ function renderSeats() {
       <div class="seat-copy">
         <div class="seat-name" title="${safeName}">${player.crowned ? '<span class="seat-crown" aria-hidden="true">&#128081;</span>' : ''}${safeName}</div>
         <div class="seat-stats">
-          <span>Bid <strong>${formatBid(player.bid)}</strong></span>
+          <span>Bid <strong>${formatBid(player)}</strong></span>
           <span>Tricks <strong>${tricks}</strong></span>
         </div>
       </div>
       <span class="seat-badge">${badge}</span>
+      ${player.blindNil ? '<span class="seat-special-badge">BLIND NIL</span>' : player.bid === 0 ? '<span class="seat-special-badge nil-badge">NIL</span>' : ''}
       ${canVoteKick ? `<button type="button" class="vote-kick-btn" title="Vote to kick">Vote kick${votes ? ` (${votes}/2)` : ''}</button>` : ''}
       ${canSitHere ? '<button type="button" class="sit-here-btn">Sit Here</button>' : ''}
       ${watchers.length ? `<div class="watcher-list">${watchers.map((watcherEntry) => `
@@ -705,6 +744,19 @@ function renderHand() {
   }
 
   handArea.innerHTML = '';
+  if (roomState.game && roomState.game.phase === 'bidding' && !myPlayer.handRevealed) {
+    for (let index = 0; index < 13; index += 1) {
+      const back = document.createElement('div');
+      back.className = 'card-btn card-back preview-back';
+      back.style.zIndex = String(index + 1);
+      const fanOffset = index - 6;
+      back.style.setProperty('--fan-angle', `${fanOffset * 3}deg`);
+      back.style.setProperty('--fan-lift', `${Math.abs(fanOffset) * 1.2}px`);
+      handArea.appendChild(back);
+    }
+    return;
+  }
+
   const cards = sortHand(myPlayer.hand || [], roomState.rankMode);
   const isMyTurn = roomState.game
     && roomState.game.currentSeat === mySeat
@@ -899,6 +951,22 @@ function sendChatMessage() {
   chatInput.value = '';
 }
 
+function sendTableOptions() {
+  if (!roomState || !roomState.roomCode) return;
+  socket.emit('setTableOptions', {
+    roomCode: roomState.roomCode,
+    stake: tableStakeSelect ? Number(tableStakeSelect.value) : roomState.stake,
+    allowNil: allowNilToggle ? allowNilToggle.checked : roomState.allowNil !== false,
+    lowClubLead: lowClubLeadToggle ? lowClubLeadToggle.checked : Boolean(roomState.lowClubLead),
+    allowWatchers: allowWatchersToggle ? allowWatchersToggle.checked : roomState.allowWatchers !== false,
+  });
+}
+
+function runOwnerCommand(command) {
+  if (!command || !roomState || !roomState.roomCode) return;
+  socket.emit('ownerCommand', { roomCode: roomState.roomCode, command, accountToken });
+}
+
 function render() {
   if (!roomState) return;
 
@@ -918,7 +986,33 @@ function render() {
   if (document.activeElement !== rankModeSelect) {
     rankModeSelect.value = roomState.rankMode || 'ace';
   }
-  stakeLabel.textContent = roomState.stake || '250';
+  const canChangeTableOptions = canChangeRankMode;
+  if (tableStakeSelect) {
+    tableStakeSelect.disabled = !canChangeTableOptions;
+    if (document.activeElement !== tableStakeSelect) tableStakeSelect.value = String(roomState.stake || 250);
+  }
+  if (allowNilToggle) {
+    allowNilToggle.disabled = !canChangeTableOptions;
+    allowNilToggle.checked = roomState.allowNil !== false;
+  }
+  if (lowClubLeadToggle) {
+    lowClubLeadToggle.disabled = !canChangeTableOptions;
+    lowClubLeadToggle.checked = Boolean(roomState.lowClubLead);
+  }
+  if (allowWatchersToggle) {
+    allowWatchersToggle.disabled = !roomState.isHost;
+    allowWatchersToggle.checked = roomState.allowWatchers !== false;
+  }
+  if (bidSelect) {
+    const nilOption = bidSelect.querySelector('option[value="0"]');
+    if (nilOption) nilOption.disabled = roomState.allowNil === false;
+    if (roomState.allowNil === false && bidSelect.value === '0') bidSelect.value = '1';
+  }
+  if (ownerMenuWrap) {
+    ownerMenuWrap.classList.toggle('hidden', !roomState.isOwner);
+    if (!roomState.isOwner && ownerMenu) ownerMenu.classList.add('hidden');
+  }
+  if (stakeLabel) stakeLabel.textContent = roomState.stake || '250';
   if (potValueEl) {
     potValueEl.textContent = `$${roomState.stake || 250}`;
   }
@@ -973,16 +1067,31 @@ function render() {
   tableSection.dataset.phase = roomState.game ? roomState.game.phase : 'lobby';
   const alreadyBid = myPlayer && Number.isInteger(myPlayer.bid);
   const isMyBidTurn = biddingOpen && Number(roomState.game.currentSeat) === Number(mySeat);
-  bidSelect.disabled = !isMyBidTurn;
-  bidBtn.disabled = !isMyBidTurn || alreadyBid;
+  const needsBlindChoice = Boolean(isMyBidTurn && myPlayer && !alreadyBid && !myPlayer.handRevealed && !myPlayer.away);
+  const showNormalBid = Boolean(isMyBidTurn && myPlayer && myPlayer.handRevealed && !alreadyBid && !myPlayer.away);
+  tableSection.classList.toggle('show-blind-bid', needsBlindChoice);
+  tableSection.classList.toggle('show-normal-bid', showNormalBid);
+  if (blindBidRow) blindBidRow.classList.toggle('hidden', !needsBlindChoice);
+  if (normalBidRow) normalBidRow.classList.toggle('hidden', !showNormalBid);
+  bidSelect.disabled = !showNormalBid;
+  bidBtn.disabled = !showNormalBid;
+  if (contractLabel) {
+    const labels = activeTenFor200Labels();
+    contractLabel.textContent = labels.join(' · ');
+    contractLabel.classList.toggle('hidden', labels.length === 0);
+  }
+  if (standUpBtn) {
+    standUpBtn.disabled = !myPlayer || Boolean(roomState.isSpectator);
+    standUpBtn.textContent = myPlayer && myPlayer.away ? "I'm Back" : 'Stand Up';
+  }
+  renderAwayHostPanel();
+  renderCountdown();
   if (biddingOpen && !isMyBidTurn && !alreadyBid) {
     const waiter = roomState.players[roomState.game.currentSeat];
     if (waiter && gameMessage && !String(gameMessage.textContent || '').includes('bids')) {
       gameMessage.textContent = `Waiting for ${waiter.name} to bid.`;
     }
-  }
-
-  showTable();
+  }showTable();
   renderSeats();
   renderHand();
   renderTrick();
@@ -993,7 +1102,91 @@ tableStyleSelect.addEventListener('change', () => {
 });
 
 applyTableTheme();
+function applyDeckStyle(value = (deckSelect && deckSelect.value) || 'classic') {
+  document.body.dataset.deckStyle = value || 'classic';
+  if (deckSelect && deckSelect.value !== value) deckSelect.value = value;
+  window.localStorage.setItem(DECK_STORAGE_KEY, value || 'classic');
+}
 
+function populateVoiceSelect() {
+  if (!voiceSelect || !window.SpadesAudio) return;
+  const selected = SpadesAudio.getVoice ? SpadesAudio.getVoice() : 'auto';
+  const voices = SpadesAudio.listVoices ? SpadesAudio.listVoices() : [];
+  voiceSelect.innerHTML = '<option value="auto">Auto voice</option>';
+  voices.forEach((voice) => {
+    const option = document.createElement('option');
+    option.value = voice.name;
+    option.textContent = `${voice.name}${voice.lang ? ` (${voice.lang})` : ''}`;
+    voiceSelect.appendChild(option);
+  });
+  voiceSelect.value = voices.some((voice) => voice.name === selected) ? selected : 'auto';
+}
+
+function countdownSeconds(game = roomState && roomState.game) {
+  if (!game || !game.turnDeadlineAt || game.paused || game.resolving) return null;
+  return Math.max(0, Math.ceil((Number(game.turnDeadlineAt) - Date.now()) / 1000));
+}
+
+function renderCountdown() {
+  if (!turnCountdownEl || !turnStatusLine) return;
+  const game = roomState && roomState.game;
+  const seconds = countdownSeconds(game);
+  turnCountdownEl.classList.remove('urgent', 'danger');
+  if (seconds == null || !game || game.currentSeat == null) {
+    turnCountdownEl.textContent = '';
+    return;
+  }
+  const isMine = Number(game.currentSeat) === Number(mySeat);
+  turnCountdownEl.textContent = `${isMine ? 'YOUR TURN' : 'TURN'} · ${seconds}s`;
+  if (seconds <= 5) turnCountdownEl.classList.add('danger');
+  else if (seconds <= 10) turnCountdownEl.classList.add('urgent');
+}
+
+function startCountdownLoop() {
+  if (countdownInterval) window.clearInterval(countdownInterval);
+  countdownInterval = window.setInterval(renderCountdown, 1000);
+}
+
+function activeTenFor200Labels() {
+  const contracts = roomState && roomState.game && roomState.game.teamContracts;
+  if (!contracts) return [];
+  return [0, 1]
+    .filter((team) => contracts[team] && contracts[team].tenFor200)
+    .map((team) => `Team ${team + 1} 10 FOR 200`);
+}
+
+function renderAwayHostPanel() {
+  if (!awayHostPanel || !roomState || !roomState.game) return;
+  const game = roomState.game;
+  const seat = game.awaitingHostResume ? game.waitingForAwaySeat : (game.awayPromptSeat ?? game.waitingForAwaySeat);
+  const player = seat != null ? roomState.players[seat] : null;
+  const show = Boolean(roomState.isHost && player && (player.away || game.awaitingHostResume || game.waitingForAwaySeat != null));
+  awayHostPanel.classList.toggle('hidden', !show);
+  if (!show) return;
+  awayHostTitle.textContent = game.awaitingHostResume ? 'PLAYER BACK' : (game.waitingForAwaySeat != null ? 'WAITING FOR PLAYER' : 'AWAY PLAYER');
+  awayHostText.textContent = game.awaitingHostResume
+    ? `${player.name} is back. Resume when the table is ready.`
+    : `${player.name} is away. Choose whether to auto-play that seat or wait.`;
+  awayAutoBtn.classList.toggle('hidden', Boolean(game.awaitingHostResume));
+  awayWaitBtn.classList.toggle('hidden', Boolean(game.awaitingHostResume));
+  resumeGameBtn.classList.toggle('hidden', !game.awaitingHostResume);
+  awayAutoBtn.dataset.seat = String(seat);
+  awayWaitBtn.dataset.seat = String(seat);
+}
+
+function showQrInvite() {
+  if (!roomState || !roomState.roomCode || !qrModal || !qrImage) return;
+  const url = inviteUrl(roomState.roomCode);
+  qrImage.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=10&data=${encodeURIComponent(url)}`;
+  qrInviteText.textContent = url;
+  qrModal.classList.remove('hidden');
+}
+
+
+applyDeckStyle(window.localStorage.getItem(DECK_STORAGE_KEY) || 'classic');
+populateVoiceSelect();
+if (window.SpadesAudio && SpadesAudio.onVoicesChanged) SpadesAudio.onVoicesChanged(populateVoiceSelect);
+startCountdownLoop();
 socket.on('connect', () => {
   markConnected();
   setError('');
@@ -1177,6 +1370,95 @@ createRoomBtn.addEventListener('click', () => {
   setError('');
 });
 
+
+if (blindNilBtn) {
+  blindNilBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode) return;
+    if (window.SpadesAudio) {
+      SpadesAudio.unlock();
+      SpadesAudio.chip();
+    }
+    socket.emit('submitBlindNil', { roomCode: roomState.roomCode });
+  });
+}
+
+if (viewHandBtn) {
+  viewHandBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode) return;
+    if (window.SpadesAudio) SpadesAudio.unlock();
+    socket.emit('viewHand', { roomCode: roomState.roomCode });
+  });
+}
+
+if (standUpBtn) {
+  standUpBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode || mySeat == null) return;
+    const me = roomState.players[mySeat];
+    socket.emit(me && me.away ? 'sitBackDown' : 'standUp', { roomCode: roomState.roomCode });
+  });
+}
+
+if (awayAutoBtn) {
+  awayAutoBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode) return;
+    socket.emit('setAwayMode', { roomCode: roomState.roomCode, seat: Number(awayAutoBtn.dataset.seat), mode: 'auto' });
+  });
+}
+
+if (awayWaitBtn) {
+  awayWaitBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode) return;
+    socket.emit('setAwayMode', { roomCode: roomState.roomCode, seat: Number(awayWaitBtn.dataset.seat), mode: 'wait' });
+  });
+}
+
+if (resumeGameBtn) {
+  resumeGameBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode) return;
+    socket.emit('resumeGame', { roomCode: roomState.roomCode });
+  });
+}
+
+if (showQrBtn) showQrBtn.addEventListener('click', showQrInvite);
+if (qrCloseBtn) qrCloseBtn.addEventListener('click', () => qrModal.classList.add('hidden'));
+if (deckSelect) deckSelect.addEventListener('change', () => applyDeckStyle(deckSelect.value));
+if (voiceSelect) {
+  voiceSelect.addEventListener('change', () => {
+    if (!window.SpadesAudio) return;
+    SpadesAudio.setVoice(voiceSelect.value);
+    SpadesAudio.say('Voice selected.');
+  });
+}
+if (tableStakeSelect) tableStakeSelect.addEventListener('change', sendTableOptions);
+if (allowNilToggle) allowNilToggle.addEventListener('change', sendTableOptions);
+if (lowClubLeadToggle) lowClubLeadToggle.addEventListener('change', sendTableOptions);
+if (allowWatchersToggle) allowWatchersToggle.addEventListener('change', sendTableOptions);
+if (ownerMenuBtn && ownerMenu) {
+  ownerMenuBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const hidden = ownerMenu.classList.toggle('hidden');
+    ownerMenuBtn.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+  });
+}
+if (ownerMenu) {
+  ownerMenu.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-owner-command]');
+    if (!button) return;
+    runOwnerCommand(button.dataset.ownerCommand);
+    ownerMenu.classList.add('hidden');
+    if (ownerMenuBtn) ownerMenuBtn.setAttribute('aria-expanded', 'false');
+  });
+}
+document.addEventListener('click', (event) => {
+  if (!ownerMenu || !ownerMenuWrap || ownerMenu.classList.contains('hidden')) return;
+  if (ownerMenuWrap.contains(event.target)) return;
+  ownerMenu.classList.add('hidden');
+  if (ownerMenuBtn) ownerMenuBtn.setAttribute('aria-expanded', 'false');
+});
+socket.on('ownerCommandResult', (result) => {
+  if (!result || !roomState || !roomState.isOwner) return;
+  setError((result.ok ? 'Owner' : 'Owner blocked') + ': ' + result.message);
+});
 rankModeSelect.addEventListener('change', () => {
   if (!roomState || !roomState.roomCode) return;
   socket.emit('setRankMode', { roomCode: roomState.roomCode, rankMode: rankModeSelect.value });
@@ -1426,3 +1708,15 @@ if (copyInviteBtn) {
     window.setTimeout(() => burst.remove(), 3000);
   });
 })();
+
+
+
+
+
+
+
+
+
+
+
+

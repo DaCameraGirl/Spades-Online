@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sortHand, pickBotCard, determineWinner, scoreTeamSeats, matchWinningTeam } = require('./spades');
+const { sortHand, pickBotCard, determineWinner, scoreTeamSeats, teamContractForSeats, matchWinningTeam } = require('./spades');
 
 function card(rank, suit) {
   return { rank, suit, code: `${rank}${suit[0]}` };
@@ -184,22 +184,22 @@ test('nil bidder fails for -100 and taken tricks count toward the team hand', ()
   assert.equal(score, -59);
 });
 
-test('a made individual bid of 10 scores 200 for the contract instead of bid*10', () => {
+test('an individual 10 plus partner 2 scores as a normal 12 contract', () => {
   const score = scoreTeamSeats(
     [0, 2],
     { 0: 10, 2: 2 },
     { 0: 10, 2: 2 }
   );
-  assert.equal(score, 200);
+  assert.equal(score, 120);
 });
 
-test('a made bid of 10 with overtricks still adds the overtrick bonus on top of 200', () => {
+test('an individual 10 plus partner 2 keeps normal overtrick scoring', () => {
   const score = scoreTeamSeats(
     [0, 2],
     { 0: 10, 2: 2 },
     { 0: 11, 2: 2 }
   );
-  assert.equal(score, 201);
+  assert.equal(score, 121);
 });
 
 test('a failed bid of 10 still costs the normal bid*10, the bonus only applies when made', () => {
@@ -211,13 +211,13 @@ test('a failed bid of 10 still costs the normal bid*10, the bonus only applies w
   assert.equal(score, -120);
 });
 
-test('a team bid summing to 10 without either player individually bidding 10 scores normally', () => {
+test('a team bid summing to 10 scores 10 for 200', () => {
   const score = scoreTeamSeats(
     [0, 2],
     { 0: 6, 2: 4 },
     { 0: 6, 2: 4 }
   );
-  assert.equal(score, 100);
+  assert.equal(score, 200);
 });
 
 test('nil bot leads low and avoids taking when it can duck', () => {
@@ -252,3 +252,53 @@ test('the team at or above the target with the higher score wins the match', () 
 test('a tie at or above the target keeps the match going', () => {
   assert.equal(matchWinningTeam({ 0: 260, 1: 260 }, 250), null);
 });
+
+test('blind nil succeeds for +200 while partner numeric contract still scores', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 0, 2: 4 },
+    { 0: 0, 2: 5 },
+    { blindNil: { 0: true } }
+  );
+  assert.equal(score, 241);
+});
+
+test('blind nil fails for -200 and taken tricks still count toward the team hand', () => {
+  const score = scoreTeamSeats(
+    [0, 2],
+    { 0: 0, 2: 4 },
+    { 0: 1, 2: 4 },
+    { blindNil: { 0: true } }
+  );
+  assert.equal(score, -159);
+});
+
+test('numeric partner bids totaling 10 activate 10 for 200', () => {
+  assert.deepEqual(teamContractForSeats([0, 2], { 0: 6, 2: 4 }), { bid: 10, tenFor200: true });
+});
+
+test('successful 10 for 200 scores +200 plus overtricks', () => {
+  assert.equal(scoreTeamSeats([0, 2], { 0: 6, 2: 4 }, { 0: 6, 2: 4 }), 200);
+  assert.equal(scoreTeamSeats([0, 2], { 0: 6, 2: 4 }, { 0: 7, 2: 4 }), 201);
+});
+
+test('failed 10 for 200 scores -200', () => {
+  assert.equal(scoreTeamSeats([0, 2], { 0: 6, 2: 4 }, { 0: 5, 2: 4 }), -200);
+});
+
+test('nil plus partner 10 uses 10 for 200 and keeps nil scoring separate', () => {
+  assert.equal(scoreTeamSeats([0, 2], { 0: 0, 2: 10 }, { 0: 0, 2: 10 }), 300);
+  assert.equal(scoreTeamSeats([0, 2], { 0: 0, 2: 10 }, { 0: 1, 2: 9 }), 100);
+});
+
+test('bot dumps instead of wasting winners once its team contract is unreachable', () => {
+  const hand = [card('4', 'Spades'), card('8', 'Hearts')];
+  const trick = [{ seat: 1, card: card('5', 'Clubs') }];
+  const played = pickBotCard(hand, 'Clubs', true, trick, 0, 'ace', { 0: 6, 2: 4 }, {
+    tricksBySeat: { 0: 1, 2: 1 },
+    teamContracts: { 0: { bid: 10, tenFor200: true } },
+  });
+  assert.equal(played.suit, 'Hearts');
+  assert.equal(played.rank, '8');
+});
+

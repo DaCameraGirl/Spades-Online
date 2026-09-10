@@ -5,6 +5,8 @@ const SpadesAudio = (() => {
   let muted = window.localStorage.getItem('spadesSound') === 'off';
   let lastSpeech = '';
   let lastSpeechAt = 0;
+  let preferredVoiceName = window.localStorage.getItem('spadesVoice') || 'auto';
+  const voicesChangedHandlers = [];
 
   function getCtx() {
     if (!ctx) {
@@ -184,13 +186,59 @@ const SpadesAudio = (() => {
     });
   }
 
+  const NATURAL_VOICE_ORDER = [
+    /Microsoft Aria Online \(Natural\).*English \(United States\)/i,
+    /Microsoft Jenny Online \(Natural\).*English \(United States\)/i,
+    /Microsoft Aria/i,
+    /Microsoft Jenny/i,
+    /Natural.*English/i,
+    /Neural.*English/i,
+    /Online.*English/i,
+  ];
+
+  function availableVoices() {
+    if (!window.speechSynthesis) return [];
+    return window.speechSynthesis.getVoices();
+  }
+
   function pickVoice() {
-    if (!window.speechSynthesis) return null;
-    const voices = window.speechSynthesis.getVoices();
-    return voices.find((voice) => /en-US/i.test(voice.lang) && /male|david|guy|tony|aaron/i.test(voice.name))
-      || voices.find((voice) => /^en/i.test(voice.lang))
+    const voices = availableVoices();
+    if (!voices.length) return null;
+    if (preferredVoiceName && preferredVoiceName !== 'auto') {
+      const chosen = voices.find((voice) => voice.name === preferredVoiceName);
+      if (chosen) return chosen;
+    }
+    for (const pattern of NATURAL_VOICE_ORDER) {
+      const match = voices.find((voice) => /^en/i.test(voice.lang || '') && pattern.test(voice.name));
+      if (match) return match;
+    }
+    return voices.find((voice) => /en-US/i.test(voice.lang || ''))
+      || voices.find((voice) => /^en/i.test(voice.lang || ''))
       || voices[0]
       || null;
+  }
+
+  function listVoices() {
+    return availableVoices()
+      .filter((voice) => /^en/i.test(voice.lang || ''))
+      .map((voice) => ({ name: voice.name, lang: voice.lang, default: Boolean(voice.default) }));
+  }
+
+  function setVoice(name) {
+    preferredVoiceName = name || 'auto';
+    window.localStorage.setItem('spadesVoice', preferredVoiceName);
+  }
+
+  function getVoice() {
+    return preferredVoiceName;
+  }
+
+  function onVoicesChanged(handler) {
+    if (typeof handler === 'function') voicesChangedHandlers.push(handler);
+  }
+
+  function notifyVoicesChanged() {
+    voicesChangedHandlers.forEach((handler) => handler());
   }
 
   function say(text) {
@@ -217,7 +265,7 @@ const SpadesAudio = (() => {
     };
   }
 
-  return { unlock, setMuted, isMuted, ping, card, trump, chip, deal, turn, trickWon, spadesBroken, matchWin, say, status };
+  return { unlock, setMuted, isMuted, ping, card, trump, chip, deal, turn, trickWon, spadesBroken, matchWin, say, status, listVoices, setVoice, getVoice, onVoicesChanged, notifyVoicesChanged };
 })();
 
 window.SpadesAudio = SpadesAudio;
@@ -226,5 +274,13 @@ window.addEventListener('pointerdown', () => SpadesAudio.unlock());
 window.addEventListener('keydown', () => SpadesAudio.unlock());
 if (window.speechSynthesis) {
   window.speechSynthesis.getVoices();
-  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+    if (window.SpadesAudio) {
+      window.SpadesAudio.listVoices();
+      window.SpadesAudio.notifyVoicesChanged();
+    }
+  };
 }
+
+

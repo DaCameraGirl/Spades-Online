@@ -31,6 +31,10 @@ function isNilBid(bid) {
   return bid === 0;
 }
 
+function isBlindNilBid(seat, specialBids = {}) {
+  return Boolean(specialBids.blindNil && specialBids.blindNil[seat]);
+}
+
 function isDeuces(mode) {
   return mode === 'deuces';
 }
@@ -148,16 +152,12 @@ function determineWinner(trickCards, leadSuit, mode = 'ace') {
 }
 
 
-// House rule: a player who individually bid 10 and whose team makes its
-// contract scores 200 for the contract instead of the usual bid*10, on
-// top of the normal per-overtrick bonus. A failed contract still costs
-// the normal bid*10, the bonus only applies to a made contract.
-function scoreContract(contractBid, tricksWon, hasTenBid = false) {
+function scoreContract(contractBid, tricksWon, tenFor200 = false) {
   if (tricksWon >= contractBid) {
-    const base = hasTenBid ? 200 : contractBid * 10;
+    const base = tenFor200 ? 200 : contractBid * 10;
     return base + (tricksWon - contractBid);
   }
-  return -contractBid * 10;
+  return tenFor200 ? -200 : -contractBid * 10;
 }
 
 function matchWinningTeam(totalScores, target) {
@@ -168,20 +168,28 @@ function matchWinningTeam(totalScores, target) {
   return team0 > team1 ? 0 : 1;
 }
 
-function scoreTeamSeats(seats, bids, tricksBySeat) {
+function teamContractForSeats(seats, bids) {
   const contractBid = seats.reduce((sum, seat) => {
     const bid = bids[seat];
     return bid === 0 ? sum : sum + (bid || 0);
   }, 0);
+  return {
+    bid: contractBid,
+    tenFor200: contractBid === 10,
+  };
+}
+
+function scoreTeamSeats(seats, bids, tricksBySeat, specialBids = {}) {
+  const contract = teamContractForSeats(seats, bids);
   const tricksWon = seats.reduce((sum, seat) => sum + (tricksBySeat[seat] || 0), 0);
   const nilScore = seats.reduce((sum, seat) => {
     if (bids[seat] !== 0) return sum;
-    return sum + ((tricksBySeat[seat] || 0) === 0 ? 100 : -100);
+    const value = isBlindNilBid(seat, specialBids) ? 200 : 100;
+    return sum + ((tricksBySeat[seat] || 0) === 0 ? value : -value);
   }, 0);
-  const hasTenBid = seats.some((seat) => bids[seat] === 10);
-  return scoreContract(contractBid, tricksWon, hasTenBid) + nilScore;
+  return scoreContract(contract.bid, tricksWon, contract.tenFor200) + nilScore;
 }
-function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0, mode = 'ace', bids = {}) {
+function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0, mode = 'ace', bids = {}, context = {}) {
   if (!hand.length) return null;
 
   const myBid = bids[seat];
@@ -190,9 +198,17 @@ function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0, mode = 
   const isNil = isNilBid(myBid);
   const partnerNil = isNilBid(partnerBid);
 
+  const teamSeats = teamForSeat(seat) === 0 ? [0, 2] : [1, 3];
+  const teamBid = context.teamContracts && context.teamContracts[teamForSeat(seat)]
+    ? context.teamContracts[teamForSeat(seat)].bid
+    : teamSeats.reduce((sum, teamSeat) => sum + (bids[teamSeat] || 0), 0);
+  const teamTricks = teamSeats.reduce((sum, teamSeat) => sum + ((context.tricksBySeat || {})[teamSeat] || 0), 0);
+  const maxFutureTricks = hand.length;
+  const contractIsDead = teamBid > 0 && teamTricks + maxFutureTricks < teamBid;
+
   const leading = !leadSuit || !trick.length;
   if (leading) {
-    return pickLead(hand, spadesBroken, mode, { nil: isNil });
+    return pickLead(hand, spadesBroken, mode, { nil: isNil || contractIsDead });
   }
 
   const follow = hand.filter((card) => effectiveSuit(card, mode) === leadSuit);
@@ -205,7 +221,7 @@ function pickBotCard(hand, leadSuit, spadesBroken, trick = [], seat = 0, mode = 
     && teamForSeat(winnerSeat) === teamForSeat(seat)
     && !nilPartnerWinning;
 
-  if (isNil) {
+  if (isNil || (contractIsDead && !nilPartnerWinning)) {
     if (follow.length) {
       const under = winnerCard
         ? follow.filter((card) => !cardBeats(card, winnerCard, leadSuit, mode))
@@ -248,5 +264,9 @@ module.exports = {
   isTrump,
   effectiveSuit,
   scoreTeamSeats,
+  teamContractForSeats,
   matchWinningTeam,
 };
+
+
+

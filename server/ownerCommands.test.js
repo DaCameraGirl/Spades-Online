@@ -288,6 +288,7 @@ test('/redeal is rejected once bidding has actually started', async (t) => {
 
   const firstBidder = states[0]().game.currentSeat;
   const firstBidderSocket = socketIndexForSeat(states, firstBidder);
+  sockets[firstBidderSocket].emit('viewHand', { roomCode });
   sockets[firstBidderSocket].emit('submitBid', { roomCode, bid: 3 });
   await waitState(states[0], (state) => state.game.bids[firstBidder] === 3, 3000, 'first bid landed');
 
@@ -304,6 +305,7 @@ test('/oops undoes the owner\'s last card, but is rejected once the next player 
   while (bidState.game.phase === 'bidding') {
     const seat = bidState.game.currentSeat;
     const socketIndex = socketIndexForSeat(states, seat);
+    sockets[socketIndex].emit('viewHand', { roomCode });
     sockets[socketIndex].emit('submitBid', { roomCode, bid: 2 });
     bidState = await waitState(states[0], (payload) => payload.game.phase === 'playing' || payload.game.currentSeat !== seat, 5000, 'bid progress');
   }
@@ -322,7 +324,8 @@ test('/oops undoes the owner\'s last card, but is rejected once the next player 
     if (state.game.phase === 'bidding') {
       const seat = state.game.currentSeat;
       const socketIndex = socketIndexForSeat(states, seat);
-      sockets[socketIndex].emit('submitBid', { roomCode, bid: 2 });
+      sockets[socketIndex].emit('viewHand', { roomCode });
+    sockets[socketIndex].emit('submitBid', { roomCode, bid: 2 });
       state = await waitState(states[0], (payload) => payload.game.currentSeat !== seat || payload.game.phase === 'playing', 5000, 'bid progress');
       continue;
     }
@@ -382,7 +385,7 @@ test('/blessme still produces a legal 13-card hand and a valid 52-card deck', as
   const result = await waitFor(sockets[0], 'ownerCommandResult');
   assert.equal(result.ok, true);
 
-  const ownerHand = await waitState(states[0], (state) => state.players.find((p) => p.isYou).hand, 3000, 'owner hand updated');
+  const ownerHand = await waitState(states[0], (state) => state.players.find((p) => p.isYou).hand.length === 13, 3000, 'owner hand updated');
   const myHand = ownerHand.players.find((p) => p.isYou).hand;
   assert.equal(myHand.length, 13);
   assert.equal(new Set(myHand.map((c) => c.code)).size, 13, 'no duplicates within the blessed hand');
@@ -440,6 +443,7 @@ test('a match with cheatsUsed never awards Elo or permanent stats, even with 4 a
       const me = state.players.find((p) => p.isYou);
       if (!me) continue;
       if (state.game.phase === 'bidding' && state.game.currentSeat === me.seat && me.bid == null) {
+        sockets[seat].emit('viewHand', { roomCode });
         sockets[seat].emit('submitBid', { roomCode, bid: 3 });
       } else if (state.game.phase === 'playing' && !state.game.resolving && state.game.currentSeat === me.seat) {
         const card = playableCard(me.hand, state.game);
@@ -467,3 +471,4 @@ test('a match with cheatsUsed never awards Elo or permanent stats, even with 4 a
   );
   assert.equal(ratedRows.rowCount, 0, 'a cheats-used match never appears in rated match history');
 });
+

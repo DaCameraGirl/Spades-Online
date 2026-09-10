@@ -25,11 +25,11 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
-const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats, matchWinningTeam } = require('./spades');
+const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats, teamContractForSeats, matchWinningTeam } = require('./spades');
 
 const STAKES = [250, 500, 1000];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-const BOT_NAMES = ['Buster', 'Lena', 'Drew'];
+const BOT_NAMES = ['Buster', 'Lena', 'Drew', 'Dexter'];
 const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
 const NEXT_HAND_MS = Number(process.env.SPADES_NEXT_HAND_MS || 4000);
@@ -74,6 +74,9 @@ function seedLobbyTables() {
         isPrivate: false,
         stake: STAKES[0],
         rankMode: 'ace',
+        allowNil: true,
+        lowClubLead: false,
+        allowWatchers: true,
         status: 'lobby',
         hostSocketId: null,
         hostSessionToken: null,
@@ -253,6 +256,9 @@ function loadRooms() {
     });
     room.spectators = [];
     room.locked = Boolean(room.locked);
+    room.allowNil = room.allowNil !== false;
+    room.lowClubLead = Boolean(room.lowClubLead);
+    room.allowWatchers = room.allowWatchers !== false;
     room.graceTimers = new Map();
     room.kickVotes = new Map();
     room.lastActivityAt = room.lastActivityAt || Date.now();
@@ -315,9 +321,54 @@ function nextSeat(seat) {
   const index = Number(seat);
   return ((Number.isInteger(index) ? index : 0) + 1) % 4;
 }
+function lowestClubSeat(room) {
+  let holder = null;
+  let bestValue = Infinity;
+  room.players.forEach((player, seat) => {
+    if (!player || !player.hand) return;
+    player.hand.forEach((card) => {
+      if (card.suit !== 'Clubs') return;
+      const value = RANKS.indexOf(card.rank);
+      if (value < bestValue) {
+        bestValue = value;
+        holder = seat;
+      }
+    });
+  });
+  return holder;
+}
+
+function lowestClubCard(player) {
+  if (!player || !player.hand) return null;
+  return player.hand
+    .filter((card) => card.suit === 'Clubs')
+    .sort((a, b) => RANKS.indexOf(a.rank) - RANKS.indexOf(b.rank))[0] || null;
+}
 
 function stillNeedsBid(player) {
   return Boolean(player) && !Number.isInteger(player.bid);
+}
+
+function gameIsActive(room) {
+  return Boolean(room && room.game && room.status === 'playing' && room.game.phase !== 'finished' && !room.game.matchOver);
+}
+
+function teamContractsForBids(bids) {
+  return {
+    0: teamContractForSeats([0, 2], bids),
+    1: teamContractForSeats([1, 3], bids),
+  };
+}
+
+function bidName(bid, blindNil = false) {
+  if (blindNil) return 'Blind Nil';
+  if (bid === 0) return 'Nil';
+  return String(bid);
+}
+
+function awayDisplayName(room, seat) {
+  const player = room && room.players ? room.players[seat] : null;
+  return player ? player.name : `Seat ${Number(seat) + 1}`;
 }
 
 function createRoom() {
@@ -327,6 +378,9 @@ function createRoom() {
     code: roomCode,
     stake: STAKES[0],
     rankMode: 'ace',
+    allowNil: true,
+    lowClubLead: false,
+    allowWatchers: true,
     status: 'lobby',
     hostSocketId: null,
     hostSessionToken: null,
@@ -354,6 +408,10 @@ function seatPlayer(room, socketId, name, sessionToken, accountPlayerId = null) 
     connected: true,
     ready: false,
     isBot: false,
+    handRevealed: false,
+    blindNil: false,
+    away: false,
+    awayChoice: null,
     accountPlayerId,
   };
   if (room.kickVotes) room.kickVotes.delete(seat);
@@ -390,6 +448,10 @@ function addBotPlayer(room, seat, name) {
     connected: true,
     ready: false,
     isBot: true,
+    handRevealed: true,
+    blindNil: false,
+    away: false,
+    awayChoice: null,
   };
 }
 
@@ -415,44 +477,63 @@ function clearRoomTimers(room) {
     clearTimeout(room.nextHandTimer);
     room.nextHandTimer = null;
   }
+  clearTurnTimer(room);
+}
+
+function clearTurnTimer(room, { clearDeadline = true } = {}) {
   if (room.turnTimer) {
     clearTimeout(room.turnTimer);
     room.turnTimer = null;
   }
-}
-
-function clearTurnTimer(room) {
-  if (room.turnTimer) {
-    clearTimeout(room.turnTimer);
-    room.turnTimer = null;
+  if (clearDeadline && room.game) {
+    room.game.turnDeadlineAt = null;
+    room.game.turnTimerSeat = null;
+    room.game.turnTimerPhase = null;
   }
 }
 
 function armTurnTimer(room) {
-  clearTurnTimer(room);
-  if (!room.turnTimerSeconds || !room.game || room.game.resolving) return;
+  if (!room || !room.turnTimerSeconds || !room.game || room.game.resolving || room.game.paused) {
+    if (room) clearTurnTimer(room);
+    return;
+  }
 
   const seatIndex = room.game.currentSeat;
   const player = room.players[seatIndex];
-  if (!player || player.isBot) return;
+  if (!player || player.isBot || (player.away && player.awayChoice === 'auto')) {
+    clearTurnTimer(room);
+    return;
+  }
 
+  if (room.turnTimer) clearTimeout(room.turnTimer);
+  const now = Date.now();
+  const sameTurn = room.game.turnTimerSeat === seatIndex
+    && room.game.turnTimerPhase === room.game.phase
+    && room.game.turnDeadlineAt
+    && room.game.turnDeadlineAt > now;
+  if (!sameTurn) {
+    room.game.turnDeadlineAt = now + room.turnTimerSeconds * 1000;
+    room.game.turnTimerSeat = seatIndex;
+    room.game.turnTimerPhase = room.game.phase;
+  }
+
+  const delayMs = Math.max(0, room.game.turnDeadlineAt - now);
   room.turnTimer = setTimeout(() => {
     room.turnTimer = null;
-    if (!room.game || room.game.resolving || room.game.currentSeat !== seatIndex) return;
+    if (!room.game || room.game.resolving || room.game.paused || room.game.currentSeat !== seatIndex) return;
     const current = room.players[seatIndex];
     if (!current || current.isBot) return;
 
-    // A slow turn auto-plays once via the same bot logic, the seat and
-    // session stay with the player (temporary AFK), it is never a
-    // permanent demotion to spectator. continueTurn re-arms this timer
-    // for their next turn, so repeated inactivity keeps auto-playing.
+    clearTurnTimer(room);
     const timedOutSocket = io.sockets.sockets.get(current.socketId);
     if (timedOutSocket) {
       timedOutSocket.emit('errorMessage', 'You timed out, your seat auto-played that turn.');
     }
-    persistRooms();
+    broadcastRoom(room);
     handleBotTurn(room, { forceSeat: seatIndex });
-  }, room.turnTimerSeconds * 1000);
+  }, delayMs);
+
+  if (!sameTurn) broadcastRoom(room);
 }
 
 function getRoomByCode(code) {
@@ -489,6 +570,7 @@ function attachPlayer(room, player, socket) {
   sendTableChatHistory(socket, room);
   persistRooms();
   broadcastRoom(room);
+  if (gameIsActive(room) && !room.game.resolving) continueTurn(room);
 }
 
 // Best-effort side effect of a match ending: award Elo if all 4 seats are
@@ -521,31 +603,48 @@ function awardRatedMatch(room, winningTeam) {
 function finishHand(room) {
   if (!room.game) return;
 
+  clearTurnTimer(room);
   const tricksBySeat = room.game.tricksBySeat || { 0: 0, 1: 0, 2: 0, 3: 0 };
-  const team0Score = scoreTeamSeats([0, 2], room.game.bids, tricksBySeat);
-  const team1Score = scoreTeamSeats([1, 3], room.game.bids, tricksBySeat);
+  const specialBids = { blindNil: room.game.blindNil || {} };
+  const teamContracts = teamContractsForBids(room.game.bids || {});
+  const team0Score = scoreTeamSeats([0, 2], room.game.bids, tricksBySeat, specialBids);
+  const team1Score = scoreTeamSeats([1, 3], room.game.bids, tricksBySeat, specialBids);
 
+  room.game.teamContracts = teamContracts;
+  room.game.handSummary = {
+    teamScores: { 0: team0Score, 1: team1Score },
+    teamContracts,
+    tricksBySeat,
+    bids: room.game.bids,
+    blindNil: room.game.blindNil || {},
+  };
   room.game.totalScores[0] = (room.game.totalScores[0] || 0) + team0Score;
   room.game.totalScores[1] = (room.game.totalScores[1] || 0) + team1Score;
 
   room.game.phase = 'finished';
   room.game.resolving = false;
   room.game.currentSeat = room.game.dealerSeat;
+  room.game.paused = false;
+  room.game.waitingForAwaySeat = null;
+  room.game.awaitingHostResume = false;
 
   const winningTeam = matchWinningTeam(room.game.totalScores, room.stake);
   if (winningTeam !== null) {
     const losingTeam = winningTeam === 0 ? 1 : 0;
     room.game.matchOver = true;
     room.game.matchWinner = winningTeam;
-    room.game.message = `Match over — Team ${winningTeam + 1} wins ${room.game.totalScores[winningTeam]} to ${room.game.totalScores[losingTeam]}!`;
+    room.game.message = `Match over - Team ${winningTeam + 1} wins ${room.game.totalScores[winningTeam]} to ${room.game.totalScores[losingTeam]}!`;
     awardRatedMatch(room, winningTeam);
     return;
   }
 
-  room.game.message = `Hand complete — Team 1: ${room.game.totalScores[0]} | Team 2: ${room.game.totalScores[1]}. Dealing the next hand...`;
+  const handLabels = [0, 1].map((team) => `Team ${team + 1} ${(team === 0 ? team0Score : team1Score) >= 0 ? '+' : ''}${team === 0 ? team0Score : team1Score}`);
+  const tenLabels = [0, 1]
+    .filter((team) => teamContracts[team].tenFor200)
+    .map((team) => `Team ${team + 1} 10 FOR 200 ${((team === 0 ? team0Score : team1Score) >= 0) ? 'made' : 'set'}`);
+  room.game.message = `Hand complete - ${handLabels.join(', ')}.${tenLabels.length ? ` ${tenLabels.join('. ')}.` : ''} Dealing the next hand...`;
   queueNextHand(room);
 }
-
 function queueNextHand(room) {
   if (!room) return;
   if (room.nextHandTimer) clearTimeout(room.nextHandTimer);
@@ -573,12 +672,77 @@ function pickBotBid(hand, mode = 'ace') {
   return 0;
 }
 
+function pickBotBlindNil(hand, mode = 'ace') {
+  const spades = hand.filter((card) => isTrump(card, mode));
+  const aces = hand.filter((card) => card.rank === 'A');
+  const highCards = hand.filter((card) => ['A', 'K', 'Q'].includes(card.rank));
+  return spades.length === 0 && aces.length === 0 && highCards.length <= 1;
+}
+
+function applyBid(room, player, bid, { blindNil = false } = {}) {
+  clearTurnTimer(room);
+  player.handRevealed = true;
+  player.blindNil = Boolean(blindNil);
+  player.bid = bid;
+  room.game.bids[player.seat] = bid;
+  room.game.blindNil[player.seat] = Boolean(blindNil);
+
+  const remainingPlayers = room.players.filter(stillNeedsBid);
+  if (remainingPlayers.length === 0) {
+    room.game.phase = 'playing';
+    room.game.currentSeat = room.lowClubLead ? lowestClubSeat(room) ?? nextSeat(room.game.dealerSeat) : nextSeat(room.game.dealerSeat);
+    room.game.leadSuit = null;
+    room.game.trick = [];
+    room.game.spadesBroken = false;
+    room.game.tricksWon = { 0: 0, 1: 0 };
+    room.game.teamContracts = teamContractsForBids(room.game.bids);
+    room.game.message = room.lowClubLead ? 'Bidding complete. Low club leads.' : 'Bidding complete. Left of dealer leads.';
+  } else {
+    room.game.currentSeat = nextSeat(player.seat);
+    room.game.message = bid === 0
+      ? `${player.name} is going for ${bidName(bid, blindNil)}!`
+      : `Waiting for bids. ${remainingPlayers.length} seat(s) left.`;
+  }
+}
+
+function pauseForAwayPlayer(room, seat) {
+  clearTurnTimer(room);
+  room.game.paused = true;
+  room.game.waitingForAwaySeat = seat;
+  room.game.awaitingHostResume = false;
+  room.game.message = `Waiting for ${awayDisplayName(room, seat)} to return.`;
+  broadcastRoom(room);
+}
+
 function continueTurn(room) {
   if (!room || !room.game || room.game.resolving) {
     if (room) clearTurnTimer(room);
     return;
   }
-  if (isBotPlayer(room.players[room.game.currentSeat])) {
+  if (room.game.paused || room.game.awaitingHostResume) {
+    clearTurnTimer(room);
+    return;
+  }
+
+  const current = room.players[room.game.currentSeat];
+  if (!current) {
+    clearTurnTimer(room);
+    return;
+  }
+
+  if (current.away) {
+    if (current.awayChoice === 'auto') {
+      clearTurnTimer(room);
+      room.game.message = `AUTO-PLAYING ${current.name}.`;
+      broadcastRoom(room);
+      queueBotTurn(room, { forceSeat: current.seat, immediate: true });
+      return;
+    }
+    pauseForAwayPlayer(room, current.seat);
+    return;
+  }
+
+  if (isBotPlayer(current)) {
     clearTurnTimer(room);
     queueBotTurn(room);
     return;
@@ -586,13 +750,13 @@ function continueTurn(room) {
   armTurnTimer(room);
 }
 
-function queueBotTurn(room) {
-  if (!room || !room.game || room.game.resolving) return;
+function queueBotTurn(room, { forceSeat = null, immediate = false } = {}) {
+  if (!room || !room.game || room.game.resolving || room.game.paused) return;
   if (room.botTimer) clearTimeout(room.botTimer);
-  const jitter = BOT_DELAY_MS * (0.6 + Math.random() * 0.9);
+  const jitter = immediate ? 0 : BOT_DELAY_MS * (0.6 + Math.random() * 0.9);
   room.botTimer = setTimeout(() => {
     room.botTimer = null;
-    handleBotTurn(room);
+    handleBotTurn(room, { forceSeat });
   }, jitter);
 }
 
@@ -641,24 +805,9 @@ function handleBotTurn(room, { forceSeat = null } = {}) {
   if (!isBotPlayer(current) && !forcing) return false;
 
   if (room.game.phase === 'bidding') {
-    const bid = pickBotBid(current.hand, room.rankMode);
-    current.bid = bid;
-    room.game.bids[current.seat] = bid;
-
-    const remaining = room.players.filter(stillNeedsBid);
-    if (remaining.length === 0) {
-      room.game.phase = 'playing';
-      room.game.currentSeat = nextSeat(room.game.dealerSeat);
-      room.game.leadSuit = null;
-      room.game.trick = [];
-      room.game.spadesBroken = false;
-      room.game.message = 'Bidding complete. Left of dealer leads.';
-    } else {
-      room.game.currentSeat = nextSeat(current.seat);
-      room.game.message = bid === 0
-        ? `${current.name} is going for Nil!`
-        : `${current.name} bids ${bid}. Waiting for ${remaining.length} more.`;
-    }
+    const blindNil = !current.handRevealed && (isBotPlayer(current) || current.awayChoice === 'auto') && pickBotBlindNil(current.hand, room.rankMode);
+    const bid = blindNil ? 0 : (room.allowNil === false ? Math.max(1, pickBotBid(current.hand, room.rankMode)) : pickBotBid(current.hand, room.rankMode));
+    applyBid(room, current, bid, { blindNil });
 
     broadcastRoom(room);
     continueTurn(room);
@@ -682,7 +831,8 @@ function handleBotTurn(room, { forceSeat = null } = {}) {
       room.game.trick,
       room.game.currentSeat,
       room.rankMode,
-      room.game.bids
+      room.game.bids,
+      { tricksBySeat: room.game.tricksBySeat || {}, teamContracts: room.game.teamContracts || teamContractsForBids(room.game.bids || {}) }
     ) || current.hand[0];
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
@@ -732,7 +882,9 @@ function dealHand(room, { preserveScores = false } = {}) {
   room.players.forEach((player, index) => {
     if (!player) return;
     player.bid = null;
+    player.blindNil = false;
     player.hand = sortHand(deck.splice(0, 13), room.rankMode);
+    player.handRevealed = Boolean(player.isBot || (player.away && player.awayChoice === 'auto'));
     player.ready = true;
     player.seat = index;
   });
@@ -747,11 +899,21 @@ function dealHand(room, { preserveScores = false } = {}) {
     spadesBroken: false,
     resolving: false,
     bids: { 0: null, 1: null, 2: null, 3: null },
+    blindNil: { 0: false, 1: false, 2: false, 3: false },
+    teamContracts: { 0: { bid: 0, tenFor200: false }, 1: { bid: 0, tenFor200: false } },
     tricksWon: { 0: 0, 1: 0 },
     tricksBySeat: { 0: 0, 1: 0, 2: 0, 3: 0 },
     totalScores: previousScores,
-    message: 'Bidding is open. Choose Nil or bid from 1 to 13.',
+    message: 'Bidding is open. Choose Blind Nil or view your hand.',
     lastTrick: null,
+    handSummary: null,
+    turnDeadlineAt: null,
+    turnTimerSeat: null,
+    turnTimerPhase: null,
+    paused: false,
+    awayPromptSeat: null,
+    waitingForAwaySeat: null,
+    awaitingHostResume: false,
     matchId,
     cheatsUsed,
   };
@@ -770,6 +932,11 @@ function validCardPlay(player, card, room) {
   const trick = room.game.trick || [];
   const mode = room.rankMode || 'ace';
   if (!trick.length) {
+    const tricksPlayed = Object.values(room.game.tricksBySeat || {}).reduce((sum, tricks) => sum + Number(tricks || 0), 0);
+    if (room.lowClubLead && tricksPlayed === 0) {
+      const forcedLead = lowestClubCard(player);
+      if (forcedLead && forcedLead.code !== card.code) return false;
+    }
     if (isTrump(card, mode) && !room.game.spadesBroken) {
       const hasNonTrump = player.hand.some((entry) => !isTrump(entry, mode));
       if (hasNonTrump) return false;
@@ -798,8 +965,13 @@ function buildPlayerPayload(room, socketId) {
       connected: player.connected,
       ready: player.ready,
       bid: player.bid,
-      hand: player.socketId === socketId ? sortHand(player.hand || [], room.rankMode) : [],
+      blindNil: Boolean(player.blindNil),
+      handRevealed: Boolean(player.handRevealed),
+      hand: player.socketId === socketId && (player.handRevealed || !room.game || room.game.phase !== 'bidding') ? sortHand(player.hand || [], room.rankMode) : [],
       isYou: player.socketId === socketId,
+      away: Boolean(player.away),
+      awayChoice: player.awayChoice || null,
+      autoPlayingAway: Boolean(player.away && player.awayChoice === 'auto'),
       isBot: Boolean(player.isBot),
       tricks: room.game && room.game.tricksBySeat ? room.game.tricksBySeat[player.seat] || 0 : 0,
       team: teamForSeat(player.seat),
@@ -819,6 +991,8 @@ function buildPlayerPayload(room, socketId) {
         trick: room.game.trick,
         leadSuit: room.game.leadSuit,
         bids: room.game.bids,
+        blindNil: room.game.blindNil || { 0: false, 1: false, 2: false, 3: false },
+        teamContracts: room.game.teamContracts || teamContractsForBids(room.game.bids || {}),
         scores: room.game.totalScores || { 0: 0, 1: 0 },
         round: room.game.round,
         message: room.game.message,
@@ -828,18 +1002,32 @@ function buildPlayerPayload(room, socketId) {
         matchOver: Boolean(room.game.matchOver),
         matchWinner: room.game.matchWinner ?? null,
         lastTrick: room.game.lastTrick || null,
+        handSummary: room.game.handSummary || null,
+        turnDeadlineAt: room.game.turnDeadlineAt || null,
+        turnTimerSeat: room.game.turnTimerSeat ?? null,
+        turnTimerPhase: room.game.turnTimerPhase || null,
+        paused: Boolean(room.game.paused),
+        awayPromptSeat: room.game.awayPromptSeat ?? null,
+        waitingForAwaySeat: room.game.waitingForAwaySeat ?? null,
+        awaitingHostResume: Boolean(room.game.awaitingHostResume),
         cheatsUsed: Boolean(room.game.cheatsUsed),
       }
     : null;
+
+  const socketPlayer = room.players.find((player) => player && player.socketId === socketId);
 
   return {
     roomCode: room.code,
     roomId: room.id,
     stake: room.stake,
     rankMode: room.rankMode || 'ace',
+    allowNil: room.allowNil !== false,
+    lowClubLead: Boolean(room.lowClubLead),
+    allowWatchers: room.allowWatchers !== false,
     players,
     game,
     isHost: room.hostSocketId === socketId,
+    isOwner: ownerCommands.isOwner({ id: socketPlayer ? socketPlayer.accountPlayerId : null }),
     status: room.status,
     isPrivate: room.isPrivate !== false,
     lobbyRoomId: room.lobbyRoomId || null,
@@ -1038,6 +1226,10 @@ io.on('connection', (socket) => {
 
     const requestedWatchSeat = Number.isInteger(watchSeat) && table.players[watchSeat] ? watchSeat : null;
     if (requestedWatchSeat !== null) {
+      if (table.allowWatchers === false) {
+        socket.emit('errorMessage', 'Watching is disabled at this table.');
+        return;
+      }
       socket.join(table.code);
       socket.data.roomCode = table.code;
       sendTableChatHistory(socket, table);
@@ -1063,6 +1255,13 @@ io.on('connection', (socket) => {
       }
       broadcastRoom(table);
       continueTurn(table);
+      return;
+    }
+
+    if (table.allowWatchers === false) {
+      socket.emit('errorMessage', 'Watching is disabled at this table.');
+      socket.leave(table.code);
+      socket.data.roomCode = null;
       return;
     }
 
@@ -1123,6 +1322,10 @@ io.on('connection', (socket) => {
       connected: true,
       ready: false,
       isBot: false,
+      handRevealed: target ? Boolean(target.handRevealed) : false,
+      blindNil: target ? Boolean(target.blindNil) : false,
+      away: false,
+      awayChoice: null,
     };
     if (room.kickVotes) room.kickVotes.delete(seatIndex);
 
@@ -1276,6 +1479,35 @@ io.on('connection', (socket) => {
     armTurnTimer(room);
   });
 
+  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, allowWatchers }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    if (room.hostSocketId !== socket.id) {
+      socket.emit('errorMessage', 'Only the host can change table options.');
+      return;
+    }
+
+    const handActive = room.game && room.game.phase !== 'finished';
+    if (allowWatchers !== undefined) room.allowWatchers = allowWatchers !== false;
+
+    if (handActive) {
+      const styleChanged = (stake !== undefined && STAKES.includes(Number(stake)) && Number(stake) !== room.stake)
+        || (allowNil !== undefined && (allowNil !== false) !== (room.allowNil !== false))
+        || (lowClubLead !== undefined && Boolean(lowClubLead) !== Boolean(room.lowClubLead));
+      if (styleChanged) {
+        socket.emit('errorMessage', 'Finish the current hand before changing scoring or lead options.');
+      }
+      broadcastRoom(room);
+      return;
+    }
+
+    const nextStake = Number(stake);
+    if (STAKES.includes(nextStake)) room.stake = nextStake;
+    if (allowNil !== undefined) room.allowNil = allowNil !== false;
+    if (lowClubLead !== undefined) room.lowClubLead = Boolean(lowClubLead);
+    broadcastRoom(room);
+  });
+
   socket.on('toggleTableLock', ({ roomCode }) => {
     const room = getRoomByCode(roomCode);
     if (!room) return;
@@ -1388,6 +1620,128 @@ io.on('connection', (socket) => {
     continueTurn(room);
   });
 
+  socket.on('viewHand', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game || room.game.phase !== 'bidding') return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player) return;
+    if (Number(room.game.currentSeat) !== Number(player.seat)) {
+      socket.emit('errorMessage', 'Wait for your bid turn to view this hand.');
+      return;
+    }
+    if (Number.isInteger(player.bid)) return;
+    player.handRevealed = true;
+    room.game.message = `${player.name} is viewing their hand.`;
+    broadcastRoom(room);
+    continueTurn(room);
+  });
+
+  socket.on('submitBlindNil', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game || room.game.phase !== 'bidding') return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player) return;
+    if (Number(room.game.currentSeat) !== Number(player.seat)) {
+      const waiter = room.players[room.game.currentSeat];
+      socket.emit('errorMessage', waiter ? `Wait - it is ${waiter.name}'s bid.` : 'It is not your turn to bid.');
+      return;
+    }
+    if (player.handRevealed) {
+      socket.emit('errorMessage', 'Blind Nil must be chosen before viewing your hand.');
+      return;
+    }
+    if (room.allowNil === false) {
+      socket.emit('errorMessage', 'Nil is disabled at this table.');
+      return;
+    }
+    applyBid(room, player, 0, { blindNil: true });
+    broadcastRoom(room);
+    continueTurn(room);
+  });
+
+  socket.on('standUp', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player || player.isBot) return;
+    player.away = true;
+    player.awayChoice = gameIsActive(room) ? null : player.awayChoice;
+    if (gameIsActive(room)) {
+      room.game.awayPromptSeat = player.seat;
+      room.game.message = `${player.name} is away. Host can wait or continue with auto-play.`;
+    }
+    broadcastRoom(room);
+    if (gameIsActive(room) && !room.game.resolving) continueTurn(room);
+  });
+
+  socket.on('sitBackDown', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room) return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player || player.isBot) return;
+    player.away = false;
+    player.awayChoice = null;
+    if (room.game && room.game.awayPromptSeat === player.seat) room.game.awayPromptSeat = null;
+    if (room.game && room.game.waitingForAwaySeat === player.seat) {
+      room.game.awaitingHostResume = true;
+      room.game.message = `${player.name} is back. Host can resume game.`;
+      broadcastRoom(room);
+      return;
+    }
+    broadcastRoom(room);
+    if (gameIsActive(room) && !room.game.resolving) continueTurn(room);
+  });
+
+  socket.on('setAwayMode', ({ roomCode, seat, mode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game) return;
+    if (room.hostSocketId !== socket.id) {
+      socket.emit('errorMessage', 'Only the host can choose away handling.');
+      return;
+    }
+    const seatIndex = Number(seat);
+    const player = room.players[seatIndex];
+    if (!player || !player.away) return;
+    if (mode === 'auto') {
+      player.awayChoice = 'auto';
+      if (room.game.awayPromptSeat === seatIndex) room.game.awayPromptSeat = null;
+      if (room.game.waitingForAwaySeat === seatIndex) {
+        room.game.paused = false;
+        room.game.waitingForAwaySeat = null;
+        room.game.awaitingHostResume = false;
+      }
+      room.game.message = `${player.name} is AUTO-PLAYING while away.`;
+      broadcastRoom(room);
+      continueTurn(room);
+      return;
+    }
+    if (mode === 'wait') {
+      player.awayChoice = 'wait';
+      if (room.game.awayPromptSeat === seatIndex) room.game.awayPromptSeat = null;
+      if (room.game.currentSeat === seatIndex && !room.game.resolving) {
+        pauseForAwayPlayer(room, seatIndex);
+        return;
+      }
+      room.game.message = `Host will wait when ${player.name}'s turn comes up.`;
+      broadcastRoom(room);
+    }
+  });
+
+  socket.on('resumeGame', ({ roomCode }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game) return;
+    if (room.hostSocketId !== socket.id) {
+      socket.emit('errorMessage', 'Only the host can resume the game.');
+      return;
+    }
+    if (!room.game.awaitingHostResume) return;
+    room.game.paused = false;
+    room.game.waitingForAwaySeat = null;
+    room.game.awaitingHostResume = false;
+    room.game.message = `${awayDisplayName(room, room.game.currentSeat)} to act.`;
+    broadcastRoom(room);
+    continueTurn(room);
+  });
   socket.on('submitBid', ({ roomCode, bid }) => {
     const room = getRoomByCode(roomCode);
     if (!room || !room.game) {
@@ -1406,7 +1760,7 @@ io.on('connection', (socket) => {
     }
     if (Number(room.game.currentSeat) !== Number(player.seat)) {
       const waiter = room.players[room.game.currentSeat];
-      socket.emit('errorMessage', waiter ? `Wait — it is ${waiter.name}'s bid.` : 'It is not your turn to bid.');
+      socket.emit('errorMessage', waiter ? `Wait - it is ${waiter.name}'s bid.` : 'It is not your turn to bid.');
       return;
     }
 
@@ -1415,25 +1769,22 @@ io.on('connection', (socket) => {
       socket.emit('errorMessage', 'Bid must be between 0 and 13.');
       return;
     }
-
-    player.bid = nextBid;
-    room.game.bids[player.seat] = nextBid;
-
-    const remainingPlayers = room.players.filter(stillNeedsBid);
-    if (remainingPlayers.length === 0) {
-      room.game.phase = 'playing';
-      room.game.currentSeat = nextSeat(room.game.dealerSeat);
-      room.game.leadSuit = null;
-      room.game.trick = [];
-      room.game.spadesBroken = false;
-      room.game.tricksWon = { 0: 0, 1: 0 };
-      room.game.message = 'Bidding complete. Left of dealer leads.';
-    } else {
-      room.game.currentSeat = nextSeat(player.seat);
-      room.game.message = nextBid === 0
-        ? `${player.name} is going for Nil!`
-        : `Waiting for bids. ${remainingPlayers.length} seat(s) left.`;
+    if (nextBid === 0 && room.allowNil === false) {
+      socket.emit('errorMessage', 'Nil is disabled at this table.');
+      return;
     }
+
+    if (player.away) {
+      socket.emit('errorMessage', 'Sit back down before taking your turn.');
+      return;
+    }
+    if (!player.handRevealed) {
+      socket.emit('errorMessage', 'Choose Blind Nil or view your hand first.');
+      return;
+    }
+    if (Number.isInteger(player.bid)) return;
+
+    applyBid(room, player, nextBid);
 
     broadcastRoom(room);
     continueTurn(room);
@@ -1445,6 +1796,10 @@ io.on('connection', (socket) => {
 
     const player = getPlayerInRoom(room, socket.id);
     if (!player) return;
+    if (player.away) {
+      socket.emit('errorMessage', 'Sit back down before playing.');
+      return;
+    }
     if (room.game.resolving) {
       socket.emit('errorMessage', 'Wait for the trick to finish.');
       return;
@@ -1463,6 +1818,7 @@ io.on('connection', (socket) => {
       return;
     }
 
+    clearTurnTimer(room);
     const cardIndex = player.hand.findIndex((card) => card.code === cardCode);
     player.hand.splice(cardIndex, 1);
 
@@ -1510,6 +1866,10 @@ io.on('connection', (socket) => {
         room.graceTimers.delete(player.sessionToken);
         const stillSeated = room.players[index];
         if (!stillSeated || stillSeated.connected) return;
+        if (stillSeated.away) {
+          broadcastRoom(room);
+          return;
+        }
 
         const result = vacateSeat(room, index);
         persistRooms();
@@ -1532,3 +1892,25 @@ app.get('*', (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Spades server running on http://localhost:${PORT}`);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
