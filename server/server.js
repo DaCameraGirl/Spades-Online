@@ -28,12 +28,12 @@ const io = new Server(server, {
 const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats, teamContractForSeats, matchWinningTeam } = require('./spades');
 
 const STAKES = [250, 500, 1000];
+const BLIND_NIL_THRESHOLDS = [50, 100, 150, 200];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const BOT_NAMES = ['Buster', 'Lena', 'Drew', 'Dexter'];
 const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
 const NEXT_HAND_MS = Number(process.env.SPADES_NEXT_HAND_MS || 4000);
-const BLIND_NIL_MIN_DEFICIT = Number(process.env.SPADES_BLIND_NIL_MIN_DEFICIT ?? 150);
 const RECONNECT_GRACE_MS = Number(process.env.SPADES_RECONNECT_GRACE_MS || 30000);
 const ROOM_TTL_MS = Number(process.env.SPADES_ROOM_TTL_MS || 6 * 60 * 60 * 1000);
 const ROOM_SWEEP_INTERVAL_MS = Number(process.env.SPADES_ROOM_SWEEP_INTERVAL_MS || 5 * 60 * 1000);
@@ -78,6 +78,7 @@ function seedLobbyTables() {
         allowNil: true,
         lowClubLead: false,
         allowWatchers: true,
+        blindNilThreshold: 150,
         status: 'lobby',
         hostSocketId: null,
         hostSessionToken: null,
@@ -99,6 +100,7 @@ function lobbyTableSummary(lobbyRoomId) {
     list.push({
       tableNumber,
       stake: table.stake,
+      rankMode: table.rankMode || 'ace',
       seatedCount: table.players.filter(Boolean).length,
       spectatorCount: (table.spectators || []).length,
       seats: table.players.map((player) => (player ? player.name : null)),
@@ -382,6 +384,7 @@ function createRoom() {
     allowNil: true,
     lowClubLead: false,
     allowWatchers: true,
+    blindNilThreshold: 150,
     status: 'lobby',
     hostSocketId: null,
     hostSessionToken: null,
@@ -1025,6 +1028,7 @@ function buildPlayerPayload(room, socketId) {
     allowNil: room.allowNil !== false,
     lowClubLead: Boolean(room.lowClubLead),
     allowWatchers: room.allowWatchers !== false,
+    blindNilThreshold: room.blindNilThreshold || 150,
     players,
     game,
     isHost: room.hostSocketId === socketId,
@@ -1480,7 +1484,7 @@ io.on('connection', (socket) => {
     armTurnTimer(room);
   });
 
-  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, allowWatchers }) => {
+  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, allowWatchers, blindNilThreshold }) => {
     const room = getRoomByCode(roomCode);
     if (!room) return;
     if (room.hostSocketId !== socket.id) {
@@ -1494,7 +1498,8 @@ io.on('connection', (socket) => {
     if (handActive) {
       const styleChanged = (stake !== undefined && STAKES.includes(Number(stake)) && Number(stake) !== room.stake)
         || (allowNil !== undefined && (allowNil !== false) !== (room.allowNil !== false))
-        || (lowClubLead !== undefined && Boolean(lowClubLead) !== Boolean(room.lowClubLead));
+        || (lowClubLead !== undefined && Boolean(lowClubLead) !== Boolean(room.lowClubLead))
+        || (blindNilThreshold !== undefined && BLIND_NIL_THRESHOLDS.includes(Number(blindNilThreshold)) && Number(blindNilThreshold) !== room.blindNilThreshold);
       if (styleChanged) {
         socket.emit('errorMessage', 'Finish the current hand before changing scoring or lead options.');
       }
@@ -1506,6 +1511,9 @@ io.on('connection', (socket) => {
     if (STAKES.includes(nextStake)) room.stake = nextStake;
     if (allowNil !== undefined) room.allowNil = allowNil !== false;
     if (lowClubLead !== undefined) room.lowClubLead = Boolean(lowClubLead);
+    if (blindNilThreshold !== undefined && BLIND_NIL_THRESHOLDS.includes(Number(blindNilThreshold))) {
+      room.blindNilThreshold = Number(blindNilThreshold);
+    }
     broadcastRoom(room);
   });
 
@@ -1659,8 +1667,10 @@ io.on('connection', (socket) => {
     const otherTeam = myTeam === 0 ? 1 : 0;
     const totalScores = room.game.totalScores || { 0: 0, 1: 0 };
     const deficit = (totalScores[otherTeam] || 0) - (totalScores[myTeam] || 0);
-    if (deficit < BLIND_NIL_MIN_DEFICIT) {
-      socket.emit('errorMessage', 'Blind Nil is only available when your team trails by 150 or more.');
+    const envThreshold = process.env.SPADES_BLIND_NIL_MIN_DEFICIT;
+    const threshold = envThreshold !== undefined ? Number(envThreshold) : (room.blindNilThreshold || 150);
+    if (deficit < threshold) {
+      socket.emit('errorMessage', `Blind Nil is only available when your team trails by ${threshold} or more.`);
       return;
     }
     applyBid(room, player, 0, { blindNil: true });

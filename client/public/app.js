@@ -66,6 +66,7 @@ const playerNameInput = document.getElementById('playerName');
 const stakeSelect = document.getElementById('stakeSelect');
 const tableStakeSelect = document.getElementById('tableStakeSelect');
 const allowNilToggle = document.getElementById('allowNilToggle');
+const blindNilThresholdSelect = document.getElementById('blindNilThresholdSelect');
 const lowClubLeadToggle = document.getElementById('lowClubLeadToggle');
 const allowWatchersToggle = document.getElementById('allowWatchersToggle');
 const tableOptionsGroup = document.getElementById('tableOptionsGroup');
@@ -837,53 +838,113 @@ function joinTable(tableNumber, watchSeat) {
   socket.emit('joinTable', payload);
 }
 
+const TABLES_PER_PAGE = 8;
+let tableGridPage = 0;
+
 function tileSeatMarkup(name, seatIndex, position, locked) {
   if (name) {
-    return `<button type="button" class="tile-seat ${position} tile-seat-filled" data-watch-seat="${seatIndex}" title="Watch ${escapeHtml(name)}">${escapeHtml(playerInitials(name))}</button>`;
+    return `
+      <button type="button" class="premium-seat ${position} premium-seat-filled" data-watch-seat="${seatIndex}" title="Watch ${escapeHtml(name)}">
+        <span class="seat-chair"></span>
+        <span class="seat-avatar">${escapeHtml(playerInitials(name))}</span>
+        <span class="seat-name">${escapeHtml(name)}</span>
+      </button>`;
   }
   if (locked) {
-    return `<span class="tile-seat ${position} tile-seat-locked" title="Table locked">&#128274;</span>`;
+    return `
+      <span class="premium-seat ${position} premium-seat-locked" title="Table locked">
+        <span class="seat-chair"></span>
+        <span class="seat-lock">&#128274;</span>
+      </span>`;
   }
-  return `<button type="button" class="tile-seat ${position} tile-seat-open" title="Join this seat">+</button>`;
+  return `
+    <button type="button" class="premium-seat ${position} premium-seat-open" title="Join this seat">
+      <span class="seat-chair"></span>
+      <span class="seat-plus">+</span>
+    </button>`;
 }
 
 function renderTableGrid(tables, targetEl = tableGrid, interactive = true) {
   targetEl.innerHTML = '';
-  tables.forEach((table) => {
+  const pageCount = Math.max(1, Math.ceil(tables.length / TABLES_PER_PAGE));
+  if (interactive && tableGridPage >= pageCount) tableGridPage = pageCount - 1;
+  const page = interactive
+    ? tables.slice(tableGridPage * TABLES_PER_PAGE, tableGridPage * TABLES_PER_PAGE + TABLES_PER_PAGE)
+    : tables;
+
+  page.forEach((table) => {
     const tile = document.createElement('div');
-    tile.className = 'table-tile';
+    tile.className = 'premium-table-card';
     const isFull = table.seatedCount >= 4;
     const isLocked = Boolean(table.locked);
     if (isFull) tile.classList.add('table-full');
     if (isLocked) tile.classList.add('table-locked');
 
     const [south, west, north, east] = table.seats;
+    const statusKey = isLocked ? 'locked' : table.inProgress ? 'in-progress' : isFull ? 'full' : 'open';
+    const statusLabel = isLocked ? 'Locked' : table.inProgress ? 'In progress' : isFull ? 'Full' : 'Open';
+    const modeLabel = table.rankMode === 'deuces' ? '2s high' : 'Standard';
 
     tile.innerHTML = `
-      <span class="table-tile-number">Table ${table.tableNumber}${isLocked ? ' &#128274;' : ''}</span>
-      <div class="tile-felt">
-        ${tileSeatMarkup(north, 2, 'seat-n', isLocked)}
-        ${tileSeatMarkup(west, 1, 'seat-w', isLocked)}
-        <span class="tile-deck" aria-hidden="true"></span>
-        ${tileSeatMarkup(east, 3, 'seat-e', isLocked)}
-        ${tileSeatMarkup(south, 0, 'seat-s', isLocked)}
+      <div class="premium-table-topline">
+        <span class="premium-table-plaque">Table ${table.tableNumber}</span>
+        <span class="premium-table-status status-${statusKey}">${statusLabel}</span>
       </div>
-      <span class="table-tile-occupancy">${table.seatedCount}/4${table.spectatorCount ? ` &middot; ${table.spectatorCount} watching` : ''}</span>
+      <div class="premium-rail">
+        <div class="premium-felt">
+          ${tileSeatMarkup(north, 2, 'seat-n', isLocked)}
+          ${tileSeatMarkup(west, 1, 'seat-w', isLocked)}
+          ${tileSeatMarkup(east, 3, 'seat-e', isLocked)}
+          ${tileSeatMarkup(south, 0, 'seat-s', isLocked)}
+          <span class="premium-felt-plaque">$${table.stake}</span>
+        </div>
+      </div>
+      <div class="premium-table-footer">
+        <span class="premium-table-meta">${table.seatedCount}/4 seated${table.spectatorCount ? ` &middot; ${table.spectatorCount} watching` : ''} &middot; ${modeLabel}</span>
+        <button type="button" class="premium-table-action" data-table-join>${isFull ? 'View' : 'Join'}</button>
+      </div>
     `;
 
     if (interactive && !isLocked) {
-      tile.querySelectorAll('.tile-seat-open').forEach((seatBtn) => {
+      tile.querySelectorAll('.premium-seat-open').forEach((seatBtn) => {
         seatBtn.addEventListener('click', () => joinTable(table.tableNumber));
       });
-      tile.querySelectorAll('.tile-seat-filled').forEach((seatBtn) => {
+      tile.querySelectorAll('.premium-seat-filled').forEach((seatBtn) => {
         seatBtn.addEventListener('click', () => joinTable(table.tableNumber, Number(seatBtn.dataset.watchSeat)));
       });
+      const actionBtn = tile.querySelector('[data-table-join]');
+      if (actionBtn) actionBtn.addEventListener('click', () => joinTable(table.tableNumber));
     } else {
       tile.querySelectorAll('button').forEach((btn) => { btn.disabled = true; });
     }
 
     targetEl.appendChild(tile);
   });
+
+  if (interactive) renderTablePager(tables.length, pageCount, targetEl);
+}
+
+function renderTablePager(totalTables, pageCount, gridEl) {
+  const existing = gridEl.parentElement && gridEl.parentElement.querySelector('.table-pager');
+  if (existing) existing.remove();
+  if (pageCount <= 1) return;
+
+  const pager = document.createElement('div');
+  pager.className = 'table-pager';
+  const start = tableGridPage * TABLES_PER_PAGE + 1;
+  const end = Math.min(totalTables, start + TABLES_PER_PAGE - 1);
+  pager.innerHTML = `
+    <button type="button" data-page-dir="-1" ${tableGridPage === 0 ? 'disabled' : ''}>Prev</button>
+    <span>Tables ${start}&ndash;${end} of ${totalTables}</span>
+    <button type="button" data-page-dir="1" ${tableGridPage >= pageCount - 1 ? 'disabled' : ''}>Next</button>
+  `;
+  pager.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      tableGridPage += Number(btn.dataset.pageDir);
+      if (latestLobbyState) renderTableGrid(latestLobbyState.tables);
+    });
+  });
+  gridEl.insertAdjacentElement('afterend', pager);
 }
 
 function renderRoster(roster, targetEl = rosterList) {
@@ -962,6 +1023,7 @@ function sendTableOptions() {
     allowNil: allowNilToggle ? allowNilToggle.checked : roomState.allowNil !== false,
     lowClubLead: lowClubLeadToggle ? lowClubLeadToggle.checked : Boolean(roomState.lowClubLead),
     allowWatchers: allowWatchersToggle ? allowWatchersToggle.checked : roomState.allowWatchers !== false,
+    blindNilThreshold: blindNilThresholdSelect ? Number(blindNilThresholdSelect.value) : roomState.blindNilThreshold,
   });
 }
 
@@ -1005,6 +1067,12 @@ function render() {
   if (lowClubLeadToggle) {
     lowClubLeadToggle.disabled = !canChangeTableOptions;
     lowClubLeadToggle.checked = Boolean(roomState.lowClubLead);
+  }
+  if (blindNilThresholdSelect) {
+    blindNilThresholdSelect.disabled = !canChangeTableOptions;
+    if (document.activeElement !== blindNilThresholdSelect) {
+      blindNilThresholdSelect.value = String(roomState.blindNilThreshold || 150);
+    }
   }
   if (allowWatchersToggle) {
     allowWatchersToggle.disabled = !roomState.isHost;
@@ -1083,7 +1151,8 @@ function render() {
     const myTeam = myPlayer ? myPlayer.team : null;
     const otherTeam = myTeam === 0 ? 1 : 0;
     const scores = (roomState.game && roomState.game.scores) || { 0: 0, 1: 0 };
-    const blindNilEligible = myTeam != null && (scores[otherTeam] || 0) - (scores[myTeam] || 0) >= 150;
+    const threshold = roomState.blindNilThreshold || 150;
+    const blindNilEligible = myTeam != null && (scores[otherTeam] || 0) - (scores[myTeam] || 0) >= threshold;
     blindNilBtn.classList.toggle('hidden', !blindNilEligible);
   }
   if (normalBidRow) normalBidRow.classList.toggle('hidden', !showNormalBid);
@@ -1446,6 +1515,7 @@ if (voiceSelect) {
 if (tableStakeSelect) tableStakeSelect.addEventListener('change', sendTableOptions);
 if (allowNilToggle) allowNilToggle.addEventListener('change', sendTableOptions);
 if (lowClubLeadToggle) lowClubLeadToggle.addEventListener('change', sendTableOptions);
+if (blindNilThresholdSelect) blindNilThresholdSelect.addEventListener('change', sendTableOptions);
 if (allowWatchersToggle) allowWatchersToggle.addEventListener('change', sendTableOptions);
 if (ownerMenuBtn && ownerMenu) {
   ownerMenuBtn.addEventListener('click', (event) => {
