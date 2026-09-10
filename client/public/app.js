@@ -69,6 +69,8 @@ const allowNilToggle = document.getElementById('allowNilToggle');
 const lowClubLeadToggle = document.getElementById('lowClubLeadToggle');
 const allowWatchersToggle = document.getElementById('allowWatchersToggle');
 const tableOptionsGroup = document.getElementById('tableOptionsGroup');
+const tableOptionsWrap = document.getElementById('tableOptionsWrap');
+const tableOptionsBtn = document.getElementById('tableOptionsBtn');
 const createRankModeSelect = document.getElementById('createRankModeSelect');
 const rankModeSelect = document.getElementById('rankModeSelect');
 const tableStyleSelect = document.getElementById('tableStyleSelect');
@@ -988,7 +990,10 @@ function render() {
     rankModeSelect.value = roomState.rankMode || 'ace';
   }
   const canChangeTableOptions = canChangeRankMode;
-  if (tableOptionsGroup) tableOptionsGroup.classList.toggle('hidden', !roomState.isHost);
+  if (tableOptionsWrap) {
+    tableOptionsWrap.classList.toggle('hidden', !roomState.isHost);
+    if (!roomState.isHost && tableOptionsGroup) tableOptionsGroup.classList.add('hidden');
+  }
   if (tableStakeSelect) {
     tableStakeSelect.disabled = !canChangeTableOptions;
     if (document.activeElement !== tableStakeSelect) tableStakeSelect.value = String(roomState.stake || 250);
@@ -1463,6 +1468,19 @@ document.addEventListener('click', (event) => {
   if (ownerMenuWrap.contains(event.target)) return;
   ownerMenu.classList.add('hidden');
   if (ownerMenuBtn) ownerMenuBtn.setAttribute('aria-expanded', 'false');
+});
+if (tableOptionsBtn && tableOptionsGroup) {
+  tableOptionsBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const hidden = tableOptionsGroup.classList.toggle('hidden');
+    tableOptionsBtn.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+  });
+}
+document.addEventListener('click', (event) => {
+  if (!tableOptionsGroup || !tableOptionsWrap || tableOptionsGroup.classList.contains('hidden')) return;
+  if (tableOptionsWrap.contains(event.target)) return;
+  tableOptionsGroup.classList.add('hidden');
+  if (tableOptionsBtn) tableOptionsBtn.setAttribute('aria-expanded', 'false');
 });
 socket.on('ownerCommandResult', (result) => {
   if (!result || !roomState || !roomState.isOwner) return;

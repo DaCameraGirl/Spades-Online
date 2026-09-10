@@ -254,7 +254,7 @@
                   <button id="copyInviteBtn" type="button" class="invite-btn">Copy invite link</button>
                   <button id="showQrBtn" type="button" class="invite-btn">QR invite</button>
                   <div class="owner-menu-wrap hidden" id="ownerMenuWrap">
-                    <button id="ownerMenuBtn" type="button" class="owner-menu-btn" aria-haspopup="true" aria-expanded="false" title="Owner commands">Owner</button>
+                    <button id="ownerMenuBtn" type="button" class="owner-menu-btn" aria-haspopup="true" aria-expanded="false" title="Owner commands">&#128081; Owner</button>
                     <div id="ownerMenu" class="owner-menu hidden">
                       <button type="button" data-owner-command="/peek">Peek</button>
                       <button type="button" data-owner-command="/redeal">Redeal</button>
@@ -265,64 +265,66 @@
                       <button type="button" data-owner-command="/confetti">Confetti</button>
                     </div>
                   </div>
+                  <div class="owner-menu-wrap hidden" id="tableOptionsWrap">
+                    <button id="tableOptionsBtn" type="button" class="owner-menu-btn" aria-haspopup="true" aria-expanded="false" title="Table settings">&#9881; Table Settings</button>
+                    <div id="tableOptionsGroup" class="owner-menu table-options-menu hidden">
+                      <label class="turn-timer-label">
+                        Stake
+                        <select id="tableStakeSelect">
+                          <option value="250">250</option>
+                          <option value="500">500</option>
+                          <option value="1000">1000</option>
+                        </select>
+                      </label>
+                      <label class="turn-timer-label">
+                        Game style
+                        <select id="rankModeSelect">
+                          <option value="ace">Standard</option>
+                          <option value="deuces">2s high</option>
+                        </select>
+                      </label>
+                      <label class="turn-timer-label">
+                        Turn timer
+                        <select id="turnTimerSelect">
+                          <option value="0">Off</option>
+                          <option value="15">15s</option>
+                          <option value="30">30s</option>
+                          <option value="45">45s</option>
+                          <option value="60">60s</option>
+                        </select>
+                      </label>
+                      <label class="table-option-toggle">
+                        <input id="allowNilToggle" type="checkbox" checked />
+                        <span>Nil</span>
+                      </label>
+                      <label class="table-option-toggle">
+                        <input id="lowClubLeadToggle" type="checkbox" />
+                        <span>Low club lead</span>
+                      </label>
+                      <label class="table-option-toggle">
+                        <input id="allowWatchersToggle" type="checkbox" checked />
+                        <span>Watchers</span>
+                      </label>
+                      <label class="turn-timer-label">
+                        Voice
+                        <select id="voiceSelect"><option value="auto">Auto voice</option></select>
+                      </label>
+                      <label class="turn-timer-label">
+                        Deck
+                        <select id="deckSelect">
+                          <option value="classic">Classic ivory</option>
+                          <option value="midnight">Midnight blue</option>
+                          <option value="ruby">Ruby casino</option>
+                          <option value="shiny">Shiny foil</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
                   <button id="standUpBtn" type="button" class="invite-btn">Stand Up</button>
                   <button id="lockTableBtn" type="button" class="invite-btn">Lock table</button>
                   <button id="leaveTableBtn" type="button" class="invite-btn">Leave table</button>
                   <button id="lastTrickBtn" type="button" class="invite-btn" disabled>Last trick</button>
                   <button id="roomPeekBtn" type="button" class="invite-btn">View room</button>
-                </div>
-
-                <div class="hud-settings-group" id="tableOptionsGroup">
-                  <label class="turn-timer-label">
-                    Stake
-                    <select id="tableStakeSelect">
-                      <option value="250">250</option>
-                      <option value="500">500</option>
-                      <option value="1000">1000</option>
-                    </select>
-                  </label>
-                  <label class="turn-timer-label">
-                    Game style
-                    <select id="rankModeSelect">
-                      <option value="ace">Standard</option>
-                      <option value="deuces">2s high</option>
-                    </select>
-                  </label>
-                  <label class="turn-timer-label">
-                    Turn timer
-                    <select id="turnTimerSelect">
-                      <option value="0">Off</option>
-                      <option value="15">15s</option>
-                      <option value="30">30s</option>
-                      <option value="45">45s</option>
-                      <option value="60">60s</option>
-                    </select>
-                  </label>
-                  <label class="table-option-toggle">
-                    <input id="allowNilToggle" type="checkbox" checked />
-                    <span>Nil</span>
-                  </label>
-                  <label class="table-option-toggle">
-                    <input id="lowClubLeadToggle" type="checkbox" />
-                    <span>Low club lead</span>
-                  </label>
-                  <label class="table-option-toggle">
-                    <input id="allowWatchersToggle" type="checkbox" checked />
-                    <span>Watchers</span>
-                  </label>
-                  <label class="turn-timer-label">
-                    Voice
-                    <select id="voiceSelect"><option value="auto">Auto voice</option></select>
-                  </label>
-                  <label class="turn-timer-label">
-                    Deck
-                    <select id="deckSelect">
-                      <option value="classic">Classic ivory</option>
-                      <option value="midnight">Midnight blue</option>
-                      <option value="ruby">Ruby casino</option>
-                      <option value="shiny">Shiny foil</option>
-                    </select>
-                  </label>
                 </div>
               </div>
             </div>
