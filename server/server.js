@@ -33,6 +33,7 @@ const BOT_NAMES = ['Buster', 'Lena', 'Drew', 'Dexter'];
 const BOT_DELAY_MS = Number(process.env.SPADES_BOT_DELAY_MS || 700);
 const TRICK_PAUSE_MS = Number(process.env.SPADES_TRICK_PAUSE_MS || 1400);
 const NEXT_HAND_MS = Number(process.env.SPADES_NEXT_HAND_MS || 4000);
+const BLIND_NIL_MIN_DEFICIT = Number(process.env.SPADES_BLIND_NIL_MIN_DEFICIT ?? 150);
 const RECONNECT_GRACE_MS = Number(process.env.SPADES_RECONNECT_GRACE_MS || 30000);
 const ROOM_TTL_MS = Number(process.env.SPADES_ROOM_TTL_MS || 6 * 60 * 60 * 1000);
 const ROOM_SWEEP_INTERVAL_MS = Number(process.env.SPADES_ROOM_SWEEP_INTERVAL_MS || 5 * 60 * 1000);
@@ -1652,6 +1653,14 @@ io.on('connection', (socket) => {
     }
     if (room.allowNil === false) {
       socket.emit('errorMessage', 'Nil is disabled at this table.');
+      return;
+    }
+    const myTeam = teamForSeat(player.seat);
+    const otherTeam = myTeam === 0 ? 1 : 0;
+    const totalScores = room.game.totalScores || { 0: 0, 1: 0 };
+    const deficit = (totalScores[otherTeam] || 0) - (totalScores[myTeam] || 0);
+    if (deficit < BLIND_NIL_MIN_DEFICIT) {
+      socket.emit('errorMessage', 'Blind Nil is only available when your team trails by 150 or more.');
       return;
     }
     applyBid(room, player, 0, { blindNil: true });

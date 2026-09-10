@@ -1186,9 +1186,30 @@ test('lobby table: the hand auto-starts once four humans are seated, no host act
 });
 
 
+test('blind nil is rejected when your team is not behind by enough', async (t) => {
+  const tokens = ['gate-host', 'gate-p2', 'gate-p3', 'gate-p4'];
+  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  t.after(() => sockets.forEach(closeSocket));
+
+  sockets[0].emit('startGame', { roomCode });
+  const bidding = await waitState(states[1], (state) => state.game && state.game.phase === 'bidding' && state.game.currentSeat === 1);
+  assert.equal(bidding.players[1].handRevealed, false);
+
+  const errorPromise = waitFor(sockets[1], 'errorMessage');
+  sockets[1].emit('submitBlindNil', { roomCode });
+  const error = await errorPromise;
+  assert.match(error, /trails by 150/);
+});
+
 test('blind nil: selected before cards are viewed and survives reconnect', async (t) => {
   const tokens = ['blind-host', 'blind-p2', 'blind-p3', 'blind-p4'];
-  const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
+  const port = randomPort(4200);
+  const blindNilDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spades-blindnil-'));
+  const server = await startServer(path.join(blindNilDataDir, 'rooms.json'), port, {
+    SPADES_BLIND_NIL_MIN_DEFICIT: '0',
+  });
+  t.after(() => stopServer(server));
+  const { sockets, states, roomCode } = await seatFourHumans(port, tokens);
   t.after(() => sockets.forEach(closeSocket));
 
   sockets[0].emit('startGame', { roomCode });
@@ -1204,7 +1225,7 @@ test('blind nil: selected before cards are viewed and survives reconnect', async
 
   sockets[1].disconnect();
   await waitState(states[0], (state) => state.players[1]?.connected === false);
-  const reconnected = await connect(sharedPort, tokens[1]);
+  const reconnected = await connect(port, tokens[1]);
   sockets[1] = reconnected;
   states[1] = createState(reconnected);
   const recovered = await waitFor(reconnected, 'roomState', (state) => state.players[1]?.blindNil === true);

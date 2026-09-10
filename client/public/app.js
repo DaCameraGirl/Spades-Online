@@ -68,6 +68,7 @@ const tableStakeSelect = document.getElementById('tableStakeSelect');
 const allowNilToggle = document.getElementById('allowNilToggle');
 const lowClubLeadToggle = document.getElementById('lowClubLeadToggle');
 const allowWatchersToggle = document.getElementById('allowWatchersToggle');
+const tableOptionsGroup = document.getElementById('tableOptionsGroup');
 const createRankModeSelect = document.getElementById('createRankModeSelect');
 const rankModeSelect = document.getElementById('rankModeSelect');
 const tableStyleSelect = document.getElementById('tableStyleSelect');
@@ -987,6 +988,7 @@ function render() {
     rankModeSelect.value = roomState.rankMode || 'ace';
   }
   const canChangeTableOptions = canChangeRankMode;
+  if (tableOptionsGroup) tableOptionsGroup.classList.toggle('hidden', !roomState.isHost);
   if (tableStakeSelect) {
     tableStakeSelect.disabled = !canChangeTableOptions;
     if (document.activeElement !== tableStakeSelect) tableStakeSelect.value = String(roomState.stake || 250);
@@ -1072,6 +1074,13 @@ function render() {
   tableSection.classList.toggle('show-blind-bid', needsBlindChoice);
   tableSection.classList.toggle('show-normal-bid', showNormalBid);
   if (blindBidRow) blindBidRow.classList.toggle('hidden', !needsBlindChoice);
+  if (blindNilBtn) {
+    const myTeam = myPlayer ? myPlayer.team : null;
+    const otherTeam = myTeam === 0 ? 1 : 0;
+    const scores = (roomState.game && roomState.game.scores) || { 0: 0, 1: 0 };
+    const blindNilEligible = myTeam != null && (scores[otherTeam] || 0) - (scores[myTeam] || 0) >= 150;
+    blindNilBtn.classList.toggle('hidden', !blindNilEligible);
+  }
   if (normalBidRow) normalBidRow.classList.toggle('hidden', !showNormalBid);
   bidSelect.disabled = !showNormalBid;
   bidBtn.disabled = !showNormalBid;
