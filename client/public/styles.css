@@ -684,7 +684,7 @@ body.room-browsing .content {
   position: absolute;
   left: 0;
   top: calc(100% + 6px);
-  z-index: 30;
+  z-index: 14;
   min-width: 128px;
   padding: 6px;
   border-radius: 8px;
@@ -717,6 +717,26 @@ body.room-browsing .content {
   gap: 10px;
   min-width: 220px;
   padding: 14px;
+}
+
+.table-options-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  min-height: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(233, 198, 109, 0.4);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--gold-strong);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.table-options-close:hover {
+  background: rgba(233, 198, 109, 0.25);
 }
 
 .owner-drawer {

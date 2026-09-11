@@ -72,6 +72,7 @@ const allowWatchersToggle = document.getElementById('allowWatchersToggle');
 const tableOptionsGroup = document.getElementById('tableOptionsGroup');
 const tableOptionsWrap = document.getElementById('tableOptionsWrap');
 const tableOptionsBtn = document.getElementById('tableOptionsBtn');
+const tableOptionsCloseBtn = document.getElementById('tableOptionsCloseBtn');
 const createRankModeSelect = document.getElementById('createRankModeSelect');
 const rankModeSelect = document.getElementById('rankModeSelect');
 const tableStyleSelect = document.getElementById('tableStyleSelect');
@@ -1551,6 +1552,24 @@ document.addEventListener('click', (event) => {
   if (tableOptionsWrap.contains(event.target)) return;
   tableOptionsGroup.classList.add('hidden');
   if (tableOptionsBtn) tableOptionsBtn.setAttribute('aria-expanded', 'false');
+});
+if (tableOptionsCloseBtn) {
+  tableOptionsCloseBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    tableOptionsGroup.classList.add('hidden');
+    if (tableOptionsBtn) tableOptionsBtn.setAttribute('aria-expanded', 'false');
+  });
+}
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (tableOptionsGroup && !tableOptionsGroup.classList.contains('hidden')) {
+    tableOptionsGroup.classList.add('hidden');
+    if (tableOptionsBtn) tableOptionsBtn.setAttribute('aria-expanded', 'false');
+  }
+  if (ownerMenu && !ownerMenu.classList.contains('hidden')) {
+    ownerMenu.classList.add('hidden');
+    if (ownerMenuBtn) ownerMenuBtn.setAttribute('aria-expanded', 'false');
+  }
 });
 socket.on('ownerCommandResult', (result) => {
   if (!result || !roomState || !roomState.isOwner) return;
