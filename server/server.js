@@ -751,7 +751,7 @@ function autoResolveNilExchange(room) {
     partnerPlayer.handRevealed = true;
   }
 
-  if (!exchange.partnerGiven && partnerPlayer && (partnerPlayer.isBot || (partnerPlayer.away && partnerPlayer.awayChoice === 'auto'))) {
+  if (exchange.nilGiven && !exchange.partnerGiven && partnerPlayer && (partnerPlayer.isBot || (partnerPlayer.away && partnerPlayer.awayChoice === 'auto'))) {
     const given = pickCardsByRank(partnerPlayer.hand, exchange.count, { highest: false });
     transferNilCards(room, exchange.partnerSeat, exchange.nilSeat, given);
     exchange.partnerGiven = given.map((card) => card.code);

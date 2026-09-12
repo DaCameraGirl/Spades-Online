@@ -319,6 +319,10 @@
                         <span>10 for 200</span>
                       </label>
                       <label class="table-option-toggle">
+                        <input id="nilPassToggle" type="checkbox" checked />
+                        <span>Nil card pass</span>
+                      </label>
+                      <label class="table-option-toggle">
                         <input id="allowWatchersToggle" type="checkbox" checked />
                         <span>Watchers</span>
                       </label>
@@ -417,6 +421,11 @@
               <div id="blindBidRow" class="blind-bid-row hidden">
                 <button id="blindNilBtn" type="button" class="primary">Blind Nil</button>
                 <button id="viewHandBtn" type="button" class="secondary">View Hand</button>
+              </div>
+
+              <div id="nilExchangeRow" class="nil-exchange-row hidden">
+                <p id="nilExchangeText"></p>
+                <button id="nilExchangeConfirmBtn" type="button" class="primary" disabled>Pass</button>
               </div>
 
               <div class="bid-row">

@@ -2774,6 +2774,47 @@ body.room-browsing .content {
   padding: 7px 14px;
 }
 
+.nil-exchange-row {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--hand-zone) - 9px);
+  transform: translateX(-50%);
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 16px;
+  text-align: center;
+  background: rgba(8, 8, 7, 0.92);
+  border: 1px solid rgba(233, 198, 109, 0.4);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.nil-exchange-row.hidden {
+  display: none;
+}
+
+.nil-exchange-row p {
+  margin: 0;
+  color: var(--gold-strong);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.nil-exchange-row button {
+  min-height: 36px;
+  border-radius: 999px;
+  padding: 7px 18px;
+}
+
+.card-btn.card-selected {
+  transform: translateY(-14px);
+  outline: 2px solid var(--gold-strong);
+  box-shadow: 0 0 0 3px rgba(233, 198, 109, 0.35);
+}
+
 .away-host-panel {
   position: absolute;
   left: 50%;

@@ -70,6 +70,10 @@ const allowNilToggle = document.getElementById('allowNilToggle');
 const blindNilThresholdSelect = document.getElementById('blindNilThresholdSelect');
 const lowClubLeadToggle = document.getElementById('lowClubLeadToggle');
 const tenFor200Toggle = document.getElementById('tenFor200Toggle');
+const nilPassToggle = document.getElementById('nilPassToggle');
+const nilExchangeRow = document.getElementById('nilExchangeRow');
+const nilExchangeText = document.getElementById('nilExchangeText');
+const nilExchangeConfirmBtn = document.getElementById('nilExchangeConfirmBtn');
 const allowWatchersToggle = document.getElementById('allowWatchersToggle');
 const tableOptionsGroup = document.getElementById('tableOptionsGroup');
 const tableOptionsWrap = document.getElementById('tableOptionsWrap');
@@ -160,6 +164,8 @@ let roomState = null;
 let mySeat = null;
 let didAutoJoin = false;
 let wasHost = false;
+let nilSelection = [];
+let nilSelectionKey = null;
 let lastAudio = null;
 let callTimer = null;
 let currentLobbyRoomId = null;
@@ -741,6 +747,42 @@ function renderSeats() {
     tableSeats.appendChild(seatCard);
   });
 }
+function nilExchangeRole(exchange) {
+  if (!exchange) return null;
+  if (exchange.nilSeat === mySeat && !exchange.nilGiven) return 'nil';
+  if (exchange.partnerSeat === mySeat && exchange.nilGiven && !exchange.partnerGiven) return 'partner';
+  return null;
+}
+
+function toggleNilSelection(value, max) {
+  const index = nilSelection.indexOf(value);
+  if (index !== -1) {
+    nilSelection.splice(index, 1);
+  } else {
+    if (nilSelection.length >= max) nilSelection.shift();
+    nilSelection.push(value);
+  }
+  renderHand();
+  renderNilExchangePrompt();
+}
+
+function renderNilExchangePrompt() {
+  if (!nilExchangeRow || !nilExchangeText || !nilExchangeConfirmBtn) return;
+  const exchange = roomState && roomState.game && roomState.game.nilExchange;
+  const role = nilExchangeRole(exchange);
+  nilExchangeRow.classList.toggle('hidden', !role);
+  if (!role) return;
+
+  const count = exchange.count;
+  if (role === 'nil') {
+    nilExchangeText.textContent = `You bid Nil, pass ${count} card${count > 1 ? 's' : ''} to your partner (${nilSelection.length}/${count} picked)`;
+  } else {
+    nilExchangeText.textContent = `Your partner is going Nil, pass ${count} card${count > 1 ? 's' : ''} back (${nilSelection.length}/${count} picked)`;
+  }
+  nilExchangeConfirmBtn.textContent = role === 'nil' ? 'Pass' : 'Pass Back';
+  nilExchangeConfirmBtn.disabled = nilSelection.length !== count;
+}
+
 function renderHand() {
   if (!roomState || mySeat === null || typeof mySeat === 'undefined') {
     handArea.innerHTML = '';
@@ -753,7 +795,33 @@ function renderHand() {
     return;
   }
 
+  const exchange = roomState.game && roomState.game.nilExchange;
+  const role = nilExchangeRole(exchange);
+  const selectionKey = role ? `${exchange.nilSeat}-${exchange.partnerSeat}-${role}-${exchange.count}` : null;
+  if (selectionKey !== nilSelectionKey) {
+    nilSelectionKey = selectionKey;
+    nilSelection = [];
+  }
+
   handArea.innerHTML = '';
+
+  if (role === 'nil' && !myPlayer.handRevealed) {
+    // Blind Nil: pick by position, the rank stays unknown until locked in.
+    for (let index = 0; index < myPlayer.handCount; index += 1) {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = `card-btn card-back preview-back${nilSelection.includes(index) ? ' card-selected' : ''}`;
+      back.style.zIndex = String(index + 1);
+      const fanOffset = index - ((myPlayer.handCount - 1) / 2);
+      back.style.setProperty('--fan-angle', `${fanOffset * 3}deg`);
+      back.style.setProperty('--fan-lift', `${Math.abs(fanOffset) * 1.2}px`);
+      back.addEventListener('click', () => toggleNilSelection(index, exchange.count));
+      handArea.appendChild(back);
+    }
+    renderNilExchangePrompt();
+    return;
+  }
+
   if (roomState.game && roomState.game.phase === 'bidding' && !myPlayer.handRevealed) {
     for (let index = 0; index < 13; index += 1) {
       const back = document.createElement('div');
@@ -773,14 +841,15 @@ function renderHand() {
     && roomState.game.phase === 'playing'
     && !roomState.game.resolving;
 
-  const isFreshDeal = roomState.game && cards.length === 13 && roomState.game.round !== lastDealtRound;
+  const isFreshDeal = !role && roomState.game && cards.length === 13 && roomState.game.round !== lastDealtRound;
   if (isFreshDeal) lastDealtRound = roomState.game.round;
 
   cards.forEach((card, index) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `card-btn ${isRedSuit(card.suit) ? 'red' : ''}${isFreshDeal ? ' card-dealt' : ''}`;
-    button.disabled = !isMyTurn;
+    const selected = role && nilSelection.includes(card.code);
+    button.className = `card-btn ${isRedSuit(card.suit) ? 'red' : ''}${isFreshDeal ? ' card-dealt' : ''}${selected ? ' card-selected' : ''}`;
+    button.disabled = role ? false : !isMyTurn;
     button.innerHTML = cardMarkup(card);
     button.title = `${card.rank} of ${card.suit}`;
     button.style.zIndex = String(index + 1);
@@ -789,6 +858,10 @@ function renderHand() {
     button.style.setProperty('--fan-lift', `${Math.abs(fanOffset) * 1.2}px`);
     if (isFreshDeal) button.style.setProperty('--deal-delay', `${index * 55}ms`);
     button.addEventListener('click', () => {
+      if (role) {
+        toggleNilSelection(card.code, exchange.count);
+        return;
+      }
       if (!roomState || !roomState.game) return;
       if (roomState.game.phase !== 'playing' || roomState.game.resolving) return;
       if (window.SpadesAudio) {
@@ -799,6 +872,8 @@ function renderHand() {
     });
     handArea.appendChild(button);
   });
+
+  renderNilExchangePrompt();
 }
 
 function renderTrick() {
@@ -1029,6 +1104,7 @@ function sendTableOptions() {
     allowNil: allowNilToggle ? allowNilToggle.checked : roomState.allowNil !== false,
     lowClubLead: lowClubLeadToggle ? lowClubLeadToggle.checked : Boolean(roomState.lowClubLead),
     tenFor200Enabled: tenFor200Toggle ? tenFor200Toggle.checked : roomState.tenFor200Enabled !== false,
+    nilPassEnabled: nilPassToggle ? nilPassToggle.checked : roomState.nilPassEnabled !== false,
     allowWatchers: allowWatchersToggle ? allowWatchersToggle.checked : roomState.allowWatchers !== false,
     blindNilThreshold: blindNilThresholdSelect ? Number(blindNilThresholdSelect.value) : roomState.blindNilThreshold,
   });
@@ -1087,6 +1163,10 @@ function render() {
   if (tenFor200Toggle) {
     tenFor200Toggle.disabled = !canChangeTableOptions;
     tenFor200Toggle.checked = roomState.tenFor200Enabled !== false;
+  }
+  if (nilPassToggle) {
+    nilPassToggle.disabled = !canChangeTableOptions;
+    nilPassToggle.checked = roomState.nilPassEnabled !== false;
   }
   if (blindNilThresholdSelect) {
     blindNilThresholdSelect.disabled = !canChangeTableOptions;
@@ -1539,6 +1619,24 @@ if (resumeGameBtn) {
 if (showQrBtn) showQrBtn.addEventListener('click', showQrInvite);
 if (qrCloseBtn) qrCloseBtn.addEventListener('click', () => qrModal.classList.add('hidden'));
 if (deckSelect) deckSelect.addEventListener('change', () => applyDeckStyle(deckSelect.value));
+if (nilExchangeConfirmBtn) {
+  nilExchangeConfirmBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode || mySeat === null) return;
+    const exchange = roomState.game && roomState.game.nilExchange;
+    const role = nilExchangeRole(exchange);
+    if (!role) return;
+    const myPlayer = roomState.players[mySeat];
+    if (role === 'nil' && !myPlayer.handRevealed) {
+      socket.emit('submitBlindNilPassCards', { roomCode: roomState.roomCode, cardIndexes: [...nilSelection] });
+    } else if (role === 'nil') {
+      socket.emit('submitNilPassCards', { roomCode: roomState.roomCode, cardCodes: [...nilSelection] });
+    } else {
+      socket.emit('submitNilReturnCards', { roomCode: roomState.roomCode, cardCodes: [...nilSelection] });
+    }
+    nilSelection = [];
+  });
+}
+
 if (voiceSelect) {
   voiceSelect.addEventListener('change', () => {
     if (!window.SpadesAudio) return;
@@ -1550,6 +1648,7 @@ if (tableStakeSelect) tableStakeSelect.addEventListener('change', sendTableOptio
 if (allowNilToggle) allowNilToggle.addEventListener('change', sendTableOptions);
 if (lowClubLeadToggle) lowClubLeadToggle.addEventListener('change', sendTableOptions);
 if (tenFor200Toggle) tenFor200Toggle.addEventListener('change', sendTableOptions);
+if (nilPassToggle) nilPassToggle.addEventListener('change', sendTableOptions);
 if (blindNilThresholdSelect) blindNilThresholdSelect.addEventListener('change', sendTableOptions);
 if (allowWatchersToggle) allowWatchersToggle.addEventListener('change', sendTableOptions);
 if (ownerMenuBtn && ownerMenu) {

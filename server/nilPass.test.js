@@ -241,3 +241,27 @@ test('table setting: turning off Nil card passing skips the exchange entirely', 
   await waitState(states[nilSeat], (state) => state.players[nilSeat].bid === 0, 3000, 'nil bid recorded');
   assert.equal(states[nilSeat]().game.nilExchange, null, 'no exchange starts when the table setting is off');
 });
+
+test("a bot partner never gives its cards back before the nil bidder has actually passed theirs", async (t) => {
+  const host = await connect(sharedPort, `nilpass-botpartner-${Date.now()}`);
+  const hostState = createState(host);
+  t.after(() => closeSocket(host));
+
+  host.emit('createRoom', { name: 'Solo Host', stake: 250, rankMode: 'ace' });
+  const created = await waitFor(host, 'roomState', (payload) => payload.roomCode);
+  const roomCode = created.roomCode;
+  host.emit('startGame', { roomCode });
+  const bidding = await waitState(hostState, (state) => state.game && state.game.phase === 'bidding' && state.game.currentSeat === 0, 5000, "the lone human's own bid turn");
+  const nilSeat = 0;
+
+  const handBefore = bidding.players[nilSeat].hand.length;
+  host.emit('submitBid', { roomCode, bid: 0 });
+
+  const exchangeStarted = await waitState(hostState, (state) => state.game.nilExchange, 3000, 'exchange started');
+  assert.equal(exchangeStarted.game.nilExchange.nilGiven, null, "the human bidder hasn't passed yet");
+  assert.equal(
+    exchangeStarted.players[nilSeat].hand.length,
+    handBefore,
+    "the bot partner must not give any cards back until the bidder's own card has actually arrived",
+  );
+});
