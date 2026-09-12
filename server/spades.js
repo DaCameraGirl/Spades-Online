@@ -260,6 +260,7 @@ module.exports = {
   pickBotCard,
   determineWinner,
   teamForSeat,
+  partnerSeatOf,
   cardBeats,
   isTrump,
   effectiveSuit,

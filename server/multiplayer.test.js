@@ -231,13 +231,10 @@ test('host can start with empty seats and bots fill the rest', async (t) => {
   assert.equal(state.players.filter(Boolean).length, 4);
   assert.equal(state.players.filter((player) => player.isBot).length, 3);
   const me = state.players.find((player) => player.isYou);
-  assert.equal(me.hand.length, 0);
-  assert.equal(me.handRevealed, false);
+  assert.equal(me.hand.length, 13, 'not blind-nil eligible, so the hand auto-reveals with no click needed');
+  assert.equal(me.handRevealed, true);
   const myTurn = await waitState(hostState, (payload) => payload.game.currentSeat === me.seat);
   assert.equal(myTurn.players.find((player) => player.isYou).bid, null);
-  host.emit('viewHand', { roomCode: created.roomCode });
-  const revealed = await waitState(hostState, (payload) => payload.players.find((player) => player.isYou).hand.length === 13, 3000, 'host hand revealed');
-  assert.equal(revealed.players.find((player) => player.isYou).hand.length, 13);
 });
 
 test('four humans: private hands, bid sync, and card-play sync', async (t) => {
@@ -929,13 +926,20 @@ test('match: the match ends once a team reaches the stake target, instead of dea
     safety += 1;
     const me = state.players.find((player) => player.isYou);
 
+    if (state.game.nilExchange && state.game.nilExchange.partnerSeat === me.seat
+        && state.game.nilExchange.nilGiven && !state.game.nilExchange.partnerGiven) {
+      host.emit('submitNilReturnCards', { roomCode, cardCodes: [me.hand[0].code] });
+      state = await waitState(hostState, (payload) => !payload.game.nilExchange, 5000, 'nil pass return');
+      continue;
+    }
+
     if (state.game.phase === 'bidding') {
       if (state.game.currentSeat === me.seat && me.bid == null) {
         host.emit('viewHand', { roomCode });
         host.emit('submitBid', { roomCode, bid: 3 });
       }
       state = await waitState(hostState, (payload) => payload.game && (
-        payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat
+        payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat || payload.game.nilExchange
       ), 5000, 'bid progress');
       continue;
     }
@@ -1106,10 +1110,16 @@ test('rated match: a match with a bot in one seat never awards Elo', async (t) =
   while (!state.game.matchOver && safety < 1200) {
     safety += 1;
     const me = state.players.find((player) => player.isYou);
+    if (state.game.nilExchange && state.game.nilExchange.partnerSeat === me.seat
+        && state.game.nilExchange.nilGiven && !state.game.nilExchange.partnerGiven) {
+      host.emit('submitNilReturnCards', { roomCode, cardCodes: [me.hand[0].code] });
+      state = await waitState(hostState, (payload) => !payload.game.nilExchange, 5000, 'nil pass return');
+      continue;
+    }
     if (state.game.phase === 'bidding') {
       if (state.game.currentSeat === me.seat && me.bid == null) host.emit('viewHand', { roomCode });
         host.emit('submitBid', { roomCode, bid: 3 });
-      state = await waitState(hostState, (payload) => payload.game && (payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat), 5000, 'bid progress');
+      state = await waitState(hostState, (payload) => payload.game && (payload.game.phase === 'playing' || payload.game.currentSeat !== state.game.currentSeat || payload.game.nilExchange), 5000, 'bid progress');
       continue;
     }
     if (state.game.phase === 'playing') {
@@ -1194,12 +1204,12 @@ test('blind nil is rejected when your team is not behind by enough', async (t) =
 
   sockets[0].emit('startGame', { roomCode });
   const bidding = await waitState(states[1], (state) => state.game && state.game.phase === 'bidding' && state.game.currentSeat === 1);
-  assert.equal(bidding.players[1].handRevealed, false);
+  assert.equal(bidding.players[1].handRevealed, true, 'not eligible, so the hand already auto-revealed');
 
   const errorPromise = waitFor(sockets[1], 'errorMessage');
   sockets[1].emit('submitBlindNil', { roomCode });
   const error = await errorPromise;
-  assert.match(error, /trails by 150/);
+  assert.match(error, /trails by 150/, 'the deficit is still the reason given, even though the hand already auto-revealed');
 });
 
 test('blind nil: selected before cards are viewed and survives reconnect', async (t) => {
@@ -1212,6 +1222,12 @@ test('blind nil: selected before cards are viewed and survives reconnect', async
   t.after(() => stopServer(server));
   const { sockets, states, roomCode } = await seatFourHumans(port, tokens);
   t.after(() => sockets.forEach(closeSocket));
+
+  // The Nil card pass is a separate feature with its own dedicated tests,
+  // off here so this test still isolates the base Blind Nil reveal timing
+  // and reconnect behavior it was written to check.
+  sockets[0].emit('setTableOptions', { roomCode, nilPassEnabled: false });
+  await waitState(states[0], (state) => state.nilPassEnabled === false);
 
   sockets[0].emit('startGame', { roomCode });
   const bidding = await waitState(states[1], (state) => state.game && state.game.phase === 'bidding' && state.game.currentSeat === 1);

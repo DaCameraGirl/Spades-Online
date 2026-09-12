@@ -25,7 +25,7 @@ const io = new Server(server, {
   pingTimeout: 60000,
 });
 
-const { SUITS, sortHand, pickBotCard, determineWinner, teamForSeat, isTrump, effectiveSuit, scoreTeamSeats, teamContractForSeats, matchWinningTeam } = require('./spades');
+const { SUITS, RANK_VALUES, sortHand, pickBotCard, determineWinner, teamForSeat, partnerSeatOf, isTrump, effectiveSuit, scoreTeamSeats, teamContractForSeats, matchWinningTeam } = require('./spades');
 
 const STAKES = [250, 500, 1000];
 const BLIND_NIL_THRESHOLDS = [50, 100, 150, 200];
@@ -78,6 +78,7 @@ function seedLobbyTables() {
         allowNil: true,
         lowClubLead: false,
         tenFor200Enabled: true,
+        nilPassEnabled: true,
         allowWatchers: true,
         blindNilThreshold: 150,
         status: 'lobby',
@@ -263,6 +264,7 @@ function loadRooms() {
     room.allowNil = room.allowNil !== false;
     room.lowClubLead = Boolean(room.lowClubLead);
     room.tenFor200Enabled = room.tenFor200Enabled !== false;
+    room.nilPassEnabled = room.nilPassEnabled !== false;
     room.allowWatchers = room.allowWatchers !== false;
     room.graceTimers = new Map();
     room.kickVotes = new Map();
@@ -690,24 +692,106 @@ function pickBotBlindNil(hand, mode = 'ace') {
   return spades.length === 0 && aces.length === 0 && highCards.length <= 1;
 }
 
+function pickCardsByRank(hand, count, { highest }) {
+  return [...hand]
+    .sort((a, b) => (highest ? RANK_VALUES[b.rank] - RANK_VALUES[a.rank] : RANK_VALUES[a.rank] - RANK_VALUES[b.rank]))
+    .slice(0, Math.min(count, hand.length));
+}
+
+function transferNilCards(room, fromSeat, toSeat, cards) {
+  const fromPlayer = room.players[fromSeat];
+  const toPlayer = room.players[toSeat];
+  if (!fromPlayer || !toPlayer || !cards.length) return;
+  const codes = new Set(cards.map((card) => card.code));
+  fromPlayer.hand = fromPlayer.hand.filter((card) => !codes.has(card.code));
+  toPlayer.hand = sortHand([...toPlayer.hand, ...cards], room.rankMode);
+}
+
+function startPlayPhase(room) {
+  room.game.phase = 'playing';
+  room.game.currentSeat = room.lowClubLead ? lowestClubSeat(room) ?? nextSeat(room.game.dealerSeat) : nextSeat(room.game.dealerSeat);
+  room.game.leadSuit = null;
+  room.game.trick = [];
+  room.game.spadesBroken = false;
+  room.game.tricksWon = { 0: 0, 1: 0 };
+  room.game.teamContracts = teamContractsForBids(room.game.bids, { tenFor200Enabled: room.tenFor200Enabled !== false });
+  room.game.message = room.lowClubLead ? 'Bidding complete. Low club leads.' : 'Bidding complete. Left of dealer leads.';
+}
+
+// The sole gate for leaving bidding: every seat must have a bid in AND any
+// pending Nil card pass must be fully settled first, cards can't be in
+// play while one is still mid-exchange.
+function maybeStartPlay(room) {
+  if (!room.game || room.game.nilExchange) return false;
+  if (room.players.filter(stillNeedsBid).length > 0) return false;
+  startPlayPhase(room);
+  return true;
+}
+
+// Bots and away-auto seats never wait on a human prompt: the Nil bidder's
+// side always gives away its highest cards, the partner's side always
+// gives back its lowest, resolved the instant it's eligible.
+function autoResolveNilExchange(room) {
+  const exchange = room.game.nilExchange;
+  if (!exchange) return;
+  const nilPlayer = room.players[exchange.nilSeat];
+  const partnerPlayer = room.players[exchange.partnerSeat];
+
+  if (!exchange.nilGiven && nilPlayer && (nilPlayer.isBot || (nilPlayer.away && nilPlayer.awayChoice === 'auto'))) {
+    const given = pickCardsByRank(nilPlayer.hand, exchange.count, { highest: true });
+    transferNilCards(room, exchange.nilSeat, exchange.partnerSeat, given);
+    exchange.nilGiven = given.map((card) => card.code);
+  }
+
+  // The partner can be just as Blind Nil-eligible as the bidder (same team,
+  // same deficit) and may not have looked at their own hand yet. The moment
+  // they're the one who has to make a real choice, there's no more reason
+  // to keep it hidden from them.
+  if (exchange.nilGiven && !exchange.partnerGiven && partnerPlayer && !partnerPlayer.isBot) {
+    partnerPlayer.handRevealed = true;
+  }
+
+  if (!exchange.partnerGiven && partnerPlayer && (partnerPlayer.isBot || (partnerPlayer.away && partnerPlayer.awayChoice === 'auto'))) {
+    const given = pickCardsByRank(partnerPlayer.hand, exchange.count, { highest: false });
+    transferNilCards(room, exchange.partnerSeat, exchange.nilSeat, given);
+    exchange.partnerGiven = given.map((card) => card.code);
+  }
+
+  finishNilExchangeIfReady(room);
+}
+
+function finishNilExchangeIfReady(room) {
+  const exchange = room.game.nilExchange;
+  if (exchange && exchange.nilGiven && exchange.partnerGiven) {
+    room.game.nilExchange = null;
+    maybeStartPlay(room);
+  }
+}
+
+function startNilExchange(room, nilSeat, count) {
+  room.game.nilExchange = { nilSeat, partnerSeat: partnerSeatOf(nilSeat), count, nilGiven: null, partnerGiven: null };
+  autoResolveNilExchange(room);
+}
+
 function applyBid(room, player, bid, { blindNil = false } = {}) {
   clearTurnTimer(room);
-  player.handRevealed = true;
+  // A Blind Nil bidder who still owes a blind card pass stays unrevealed a
+  // little longer, revealing right away would defeat the point of picking
+  // those cards by feel instead of by rank.
+  const exchangeEnabled = bid === 0 && room.nilPassEnabled !== false && room.allowNil !== false;
+  if (!(blindNil && exchangeEnabled)) player.handRevealed = true;
   player.blindNil = Boolean(blindNil);
   player.bid = bid;
   room.game.bids[player.seat] = bid;
   room.game.blindNil[player.seat] = Boolean(blindNil);
 
+  if (exchangeEnabled) startNilExchange(room, player.seat, blindNil ? 2 : 1);
+
   const remainingPlayers = room.players.filter(stillNeedsBid);
   if (remainingPlayers.length === 0) {
-    room.game.phase = 'playing';
-    room.game.currentSeat = room.lowClubLead ? lowestClubSeat(room) ?? nextSeat(room.game.dealerSeat) : nextSeat(room.game.dealerSeat);
-    room.game.leadSuit = null;
-    room.game.trick = [];
-    room.game.spadesBroken = false;
-    room.game.tricksWon = { 0: 0, 1: 0 };
-    room.game.teamContracts = teamContractsForBids(room.game.bids, { tenFor200Enabled: room.tenFor200Enabled !== false });
-    room.game.message = room.lowClubLead ? 'Bidding complete. Low club leads.' : 'Bidding complete. Left of dealer leads.';
+    if (!maybeStartPlay(room)) {
+      room.game.message = `${player.name} is going for ${bidName(bid, blindNil)}! Waiting on the Nil card pass.`;
+    }
   } else {
     room.game.currentSeat = nextSeat(player.seat);
     room.game.message = bid === 0
@@ -889,13 +973,25 @@ function dealHand(room, { preserveScores = false } = {}) {
   // (preserveScores: false) starts clean.
   const cheatsUsed = preserveScores && room.game ? Boolean(room.game.cheatsUsed) : false;
 
+  const envThreshold = process.env.SPADES_BLIND_NIL_MIN_DEFICIT;
+  const blindNilThreshold = envThreshold !== undefined ? Number(envThreshold) : (room.blindNilThreshold || 150);
+
   const deck = makeDeck();
   room.players.forEach((player, index) => {
     if (!player) return;
     player.bid = null;
     player.blindNil = false;
     player.hand = sortHand(deck.splice(0, 13), room.rankMode);
-    player.handRevealed = Boolean(player.isBot || (player.away && player.awayChoice === 'auto'));
+    const myTeam = teamForSeat(index);
+    const otherTeam = myTeam === 0 ? 1 : 0;
+    const deficit = (previousScores[otherTeam] || 0) - (previousScores[myTeam] || 0);
+    // Blind Nil only ever matters when a player is actually eligible for it.
+    // Making everyone click "View Hand" first just to reach the normal bid
+    // row on the vast majority of hands, where nobody trails by enough to
+    // qualify, is a pointless extra tap, so only hold the reveal back when
+    // there's a real choice on the table.
+    const blindNilEligible = room.allowNil !== false && deficit >= blindNilThreshold;
+    player.handRevealed = Boolean(player.isBot || (player.away && player.awayChoice === 'auto') || !blindNilEligible);
     player.ready = true;
     player.seat = index;
   });
@@ -925,6 +1021,7 @@ function dealHand(room, { preserveScores = false } = {}) {
     awayPromptSeat: null,
     waitingForAwaySeat: null,
     awaitingHostResume: false,
+    nilExchange: null,
     matchId,
     cheatsUsed,
   };
@@ -979,6 +1076,7 @@ function buildPlayerPayload(room, socketId) {
       blindNil: Boolean(player.blindNil),
       handRevealed: Boolean(player.handRevealed),
       hand: player.socketId === socketId && (player.handRevealed || !room.game || room.game.phase !== 'bidding') ? sortHand(player.hand || [], room.rankMode) : [],
+      handCount: player.hand ? player.hand.length : 0,
       isYou: player.socketId === socketId,
       away: Boolean(player.away),
       awayChoice: player.awayChoice || null,
@@ -1020,6 +1118,7 @@ function buildPlayerPayload(room, socketId) {
         paused: Boolean(room.game.paused),
         awayPromptSeat: room.game.awayPromptSeat ?? null,
         waitingForAwaySeat: room.game.waitingForAwaySeat ?? null,
+        nilExchange: room.game.nilExchange || null,
         awaitingHostResume: Boolean(room.game.awaitingHostResume),
         cheatsUsed: Boolean(room.game.cheatsUsed),
       }
@@ -1035,6 +1134,7 @@ function buildPlayerPayload(room, socketId) {
     allowNil: room.allowNil !== false,
     lowClubLead: Boolean(room.lowClubLead),
     tenFor200Enabled: room.tenFor200Enabled !== false,
+    nilPassEnabled: room.nilPassEnabled !== false,
     allowWatchers: room.allowWatchers !== false,
     blindNilThreshold: room.blindNilThreshold || 150,
     players,
@@ -1505,7 +1605,7 @@ io.on('connection', (socket) => {
     armTurnTimer(room);
   });
 
-  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, tenFor200Enabled, allowWatchers, blindNilThreshold }) => {
+  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, tenFor200Enabled, nilPassEnabled, allowWatchers, blindNilThreshold }) => {
     const room = getRoomByCode(roomCode);
     if (!room) return;
     if (room.hostSocketId !== socket.id) {
@@ -1521,6 +1621,7 @@ io.on('connection', (socket) => {
         || (allowNil !== undefined && (allowNil !== false) !== (room.allowNil !== false))
         || (lowClubLead !== undefined && Boolean(lowClubLead) !== Boolean(room.lowClubLead))
         || (tenFor200Enabled !== undefined && (tenFor200Enabled !== false) !== (room.tenFor200Enabled !== false))
+        || (nilPassEnabled !== undefined && (nilPassEnabled !== false) !== (room.nilPassEnabled !== false))
         || (blindNilThreshold !== undefined && BLIND_NIL_THRESHOLDS.includes(Number(blindNilThreshold)) && Number(blindNilThreshold) !== room.blindNilThreshold);
       if (styleChanged) {
         socket.emit('errorMessage', 'Finish the current hand before changing scoring or lead options.');
@@ -1534,6 +1635,7 @@ io.on('connection', (socket) => {
     if (allowNil !== undefined) room.allowNil = allowNil !== false;
     if (lowClubLead !== undefined) room.lowClubLead = Boolean(lowClubLead);
     if (tenFor200Enabled !== undefined) room.tenFor200Enabled = tenFor200Enabled !== false;
+    if (nilPassEnabled !== undefined) room.nilPassEnabled = nilPassEnabled !== false;
     if (blindNilThreshold !== undefined && BLIND_NIL_THRESHOLDS.includes(Number(blindNilThreshold))) {
       room.blindNilThreshold = Number(blindNilThreshold);
     }
@@ -1678,10 +1780,6 @@ io.on('connection', (socket) => {
       socket.emit('errorMessage', waiter ? `Wait - it is ${waiter.name}'s bid.` : 'It is not your turn to bid.');
       return;
     }
-    if (player.handRevealed) {
-      socket.emit('errorMessage', 'Blind Nil must be chosen before viewing your hand.');
-      return;
-    }
     if (room.allowNil === false) {
       socket.emit('errorMessage', 'Nil is disabled at this table.');
       return;
@@ -1696,7 +1794,92 @@ io.on('connection', (socket) => {
       socket.emit('errorMessage', `Blind Nil is only available when your team trails by ${threshold} or more.`);
       return;
     }
+    if (player.handRevealed) {
+      socket.emit('errorMessage', 'Blind Nil must be chosen before viewing your hand.');
+      return;
+    }
     applyBid(room, player, 0, { blindNil: true });
+    broadcastRoom(room);
+    continueTurn(room);
+  });
+
+  socket.on('submitNilPassCards', ({ roomCode, cardCodes }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game || !room.game.nilExchange) return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player) return;
+    const exchange = room.game.nilExchange;
+    if (exchange.nilSeat !== player.seat || exchange.nilGiven) return;
+    if (!player.handRevealed) {
+      socket.emit('errorMessage', 'Use the blind pass for Blind Nil.');
+      return;
+    }
+    const codes = Array.isArray(cardCodes) ? cardCodes : [];
+    if (codes.length !== exchange.count) {
+      socket.emit('errorMessage', `Pick exactly ${exchange.count} card${exchange.count > 1 ? 's' : ''} to pass.`);
+      return;
+    }
+    const cards = codes.map((code) => player.hand.find((card) => card.code === code)).filter(Boolean);
+    if (cards.length !== codes.length) {
+      socket.emit('errorMessage', 'That card is not in your hand.');
+      return;
+    }
+    transferNilCards(room, exchange.nilSeat, exchange.partnerSeat, cards);
+    exchange.nilGiven = cards.map((card) => card.code);
+    autoResolveNilExchange(room);
+    broadcastRoom(room);
+    continueTurn(room);
+  });
+
+  socket.on('submitBlindNilPassCards', ({ roomCode, cardIndexes }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game || !room.game.nilExchange) return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player) return;
+    const exchange = room.game.nilExchange;
+    if (exchange.nilSeat !== player.seat || exchange.nilGiven) return;
+    if (player.handRevealed) {
+      socket.emit('errorMessage', 'Your hand is already revealed, use the normal pass.');
+      return;
+    }
+    const indexes = Array.isArray(cardIndexes) ? [...new Set(cardIndexes.map(Number))] : [];
+    const valid = indexes.length === exchange.count
+      && indexes.every((index) => Number.isInteger(index) && index >= 0 && index < player.hand.length);
+    if (!valid) {
+      socket.emit('errorMessage', `Pick exactly ${exchange.count} card${exchange.count > 1 ? 's' : ''} to pass.`);
+      return;
+    }
+    const cards = indexes.map((index) => player.hand[index]);
+    transferNilCards(room, exchange.nilSeat, exchange.partnerSeat, cards);
+    exchange.nilGiven = cards.map((card) => card.code);
+    // The irreversible blind choice is locked in now, so there's no more
+    // reason to keep the rest of the hand hidden from its own owner.
+    player.handRevealed = true;
+    autoResolveNilExchange(room);
+    broadcastRoom(room);
+    continueTurn(room);
+  });
+
+  socket.on('submitNilReturnCards', ({ roomCode, cardCodes }) => {
+    const room = getRoomByCode(roomCode);
+    if (!room || !room.game || !room.game.nilExchange) return;
+    const player = getPlayerInRoom(room, socket.id);
+    if (!player) return;
+    const exchange = room.game.nilExchange;
+    if (exchange.partnerSeat !== player.seat || !exchange.nilGiven || exchange.partnerGiven) return;
+    const codes = Array.isArray(cardCodes) ? cardCodes : [];
+    if (codes.length !== exchange.count) {
+      socket.emit('errorMessage', `Pick exactly ${exchange.count} card${exchange.count > 1 ? 's' : ''} to pass back.`);
+      return;
+    }
+    const cards = codes.map((code) => player.hand.find((card) => card.code === code)).filter(Boolean);
+    if (cards.length !== codes.length) {
+      socket.emit('errorMessage', 'That card is not in your hand.');
+      return;
+    }
+    transferNilCards(room, exchange.partnerSeat, exchange.nilSeat, cards);
+    exchange.partnerGiven = cards.map((card) => card.code);
+    finishNilExchangeIfReady(room);
     broadcastRoom(room);
     continueTurn(room);
   });
