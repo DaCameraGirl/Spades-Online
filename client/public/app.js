@@ -123,6 +123,7 @@ const contractLabel = document.getElementById('contractLabel');
 const awayHostPanel = document.getElementById('awayHostPanel');
 const awayHostTitle = document.getElementById('awayHostTitle');
 const awayHostText = document.getElementById('awayHostText');
+const awayImBackBtn = document.getElementById('awayImBackBtn');
 const awayAutoBtn = document.getElementById('awayAutoBtn');
 const awayWaitBtn = document.getElementById('awayWaitBtn');
 const resumeGameBtn = document.getElementById('resumeGameBtn');
@@ -1266,16 +1267,19 @@ function renderAwayHostPanel() {
   const game = roomState.game;
   const seat = game.awaitingHostResume ? game.waitingForAwaySeat : (game.awayPromptSeat ?? game.waitingForAwaySeat);
   const player = seat != null ? roomState.players[seat] : null;
-  const show = Boolean(roomState.isHost && player && (player.away || game.awaitingHostResume || game.waitingForAwaySeat != null));
+  const iAmTheAwaySeat = seat != null && seat === mySeat;
+  const show = Boolean(player && (player.away || game.awaitingHostResume || game.waitingForAwaySeat != null) && (roomState.isHost || iAmTheAwaySeat));
   awayHostPanel.classList.toggle('hidden', !show);
   if (!show) return;
   awayHostTitle.textContent = game.awaitingHostResume ? 'PLAYER BACK' : (game.waitingForAwaySeat != null ? 'WAITING FOR PLAYER' : 'AWAY PLAYER');
   awayHostText.textContent = game.awaitingHostResume
     ? `${player.name} is back. Resume when the table is ready.`
     : `${player.name} is away. Choose whether to auto-play that seat or wait.`;
-  awayAutoBtn.classList.toggle('hidden', Boolean(game.awaitingHostResume));
-  awayWaitBtn.classList.toggle('hidden', Boolean(game.awaitingHostResume));
-  resumeGameBtn.classList.toggle('hidden', !game.awaitingHostResume);
+  const showHostChoices = roomState.isHost && !game.awaitingHostResume;
+  if (awayImBackBtn) awayImBackBtn.classList.toggle('hidden', !(iAmTheAwaySeat && player.away));
+  awayAutoBtn.classList.toggle('hidden', !showHostChoices);
+  awayWaitBtn.classList.toggle('hidden', !showHostChoices);
+  resumeGameBtn.classList.toggle('hidden', !(roomState.isHost && game.awaitingHostResume));
   awayAutoBtn.dataset.seat = String(seat);
   awayWaitBtn.dataset.seat = String(seat);
 }
@@ -1501,6 +1505,13 @@ if (standUpBtn) {
     if (!roomState || !roomState.roomCode || mySeat == null) return;
     const me = roomState.players[mySeat];
     socket.emit(me && me.away ? 'sitBackDown' : 'standUp', { roomCode: roomState.roomCode });
+  });
+}
+
+if (awayImBackBtn) {
+  awayImBackBtn.addEventListener('click', () => {
+    if (!roomState || !roomState.roomCode) return;
+    socket.emit('sitBackDown', { roomCode: roomState.roomCode });
   });
 }
 
