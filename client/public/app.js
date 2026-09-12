@@ -59,6 +59,7 @@ const accountScreenName = document.getElementById('accountScreenName');
 const accountRating = document.getElementById('accountRating');
 const logoutBtn = document.getElementById('logoutBtn');
 const roomCodeLabel = document.getElementById('roomCodeLabel');
+const rankModeBadge = document.getElementById('rankModeBadge');
 const stakeLabel = document.getElementById('stakeLabel');
 const errorBox = document.getElementById('errorBox');
 const roomCodeInput = document.getElementById('roomCodeInput');
@@ -1039,6 +1040,10 @@ function runOwnerCommand(command) {
 
 function render() {
   if (!roomState) return;
+
+  if (rankModeBadge) {
+    rankModeBadge.textContent = roomState.rankMode === 'deuces' ? '2s Wild' : 'Ace High';
+  }
 
   roomCodeLabel.textContent = roomState.roomCode || '';
   syncRoomUrl(roomState.roomCode);
