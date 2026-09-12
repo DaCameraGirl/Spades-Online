@@ -73,6 +73,7 @@ const tableOptionsGroup = document.getElementById('tableOptionsGroup');
 const tableOptionsWrap = document.getElementById('tableOptionsWrap');
 const tableOptionsBtn = document.getElementById('tableOptionsBtn');
 const tableOptionsCloseBtn = document.getElementById('tableOptionsCloseBtn');
+const tableOptionsPlayBtn = document.getElementById('tableOptionsPlayBtn');
 const createRankModeSelect = document.getElementById('createRankModeSelect');
 const rankModeSelect = document.getElementById('rankModeSelect');
 const tableStyleSelect = document.getElementById('tableStyleSelect');
@@ -155,6 +156,7 @@ const SUIT_MARK = {
 let roomState = null;
 let mySeat = null;
 let didAutoJoin = false;
+let wasHost = false;
 let lastAudio = null;
 let callTimer = null;
 let currentLobbyRoomId = null;
@@ -1057,6 +1059,11 @@ function render() {
     tableOptionsWrap.classList.toggle('hidden', !roomState.isHost);
     if (!roomState.isHost && tableOptionsGroup) tableOptionsGroup.classList.add('hidden');
   }
+  if (roomState.isHost && !wasHost && tableOptionsGroup && tableOptionsBtn) {
+    tableOptionsGroup.classList.remove('hidden');
+    tableOptionsBtn.setAttribute('aria-expanded', 'true');
+  }
+  wasHost = Boolean(roomState.isHost);
   if (tableStakeSelect) {
     tableStakeSelect.disabled = !canChangeTableOptions;
     if (document.activeElement !== tableStakeSelect) tableStakeSelect.value = String(roomState.stake || 250);
@@ -1119,6 +1126,10 @@ function render() {
     startGameBtn.textContent = 'Waiting for host';
   } else {
     startGameBtn.textContent = 'Waiting for players';
+  }
+  if (tableOptionsPlayBtn) {
+    tableOptionsPlayBtn.textContent = startGameBtn.textContent;
+    tableOptionsPlayBtn.disabled = startGameBtn.disabled;
   }
 
   const currentSeatInfo = roomState.game && roomState.players[roomState.game.currentSeat]
@@ -1592,7 +1603,7 @@ joinRoomBtn.addEventListener('click', () => {
   setError('');
 });
 
-startGameBtn.addEventListener('click', () => {
+function handleStartOrNextHand() {
   if (!roomState || !roomState.roomCode) return;
   if (window.SpadesAudio) {
     SpadesAudio.unlock();
@@ -1603,7 +1614,15 @@ startGameBtn.addEventListener('click', () => {
     return;
   }
   socket.emit('startGame', { roomCode: roomState.roomCode });
-});
+}
+startGameBtn.addEventListener('click', handleStartOrNextHand);
+if (tableOptionsPlayBtn) {
+  tableOptionsPlayBtn.addEventListener('click', () => {
+    handleStartOrNextHand();
+    if (tableOptionsGroup) tableOptionsGroup.classList.add('hidden');
+    if (tableOptionsBtn) tableOptionsBtn.setAttribute('aria-expanded', 'false');
+  });
+}
 
 bidBtn.addEventListener('click', () => {
   if (!roomState || !roomState.roomCode) return;

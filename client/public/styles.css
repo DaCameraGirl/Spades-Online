@@ -739,6 +739,10 @@ body.room-browsing .content {
   background: rgba(233, 198, 109, 0.25);
 }
 
+.table-options-play {
+  margin-top: 14px;
+}
+
 .owner-drawer {
   position: fixed;
   bottom: 16px;

@@ -722,7 +722,7 @@ test('voteKick: you cannot vote to kick yourself', async (t) => {
   assert.equal(await selfError, 'You cannot vote to kick yourself.');
 });
 
-test('turn timer: a player who lets their turn expire has that turn auto-played, but keeps their seat', async (t) => {
+test('turn timer: a player who lets their turn expire is stood up, and the host is prompted to wait or continue', async (t) => {
   const tokens = ['timer-1', 'timer-2', 'timer-3', 'timer-4'];
   const sockets = [];
   const states = [];
@@ -742,10 +742,11 @@ test('turn timer: a player who lets their turn expire has that turn auto-played,
   const timedOutSeat = started.game.currentSeat;
   const timedOutError = waitFor(sockets[timedOutSeat], 'errorMessage');
 
-  const updated = await waitState(states[0], (state) => state.players[timedOutSeat].bid !== null, 3000, 'auto-play after timeout');
-  assert.equal(updated.players[timedOutSeat].isBot, false, 'the seat stays with the human, this is never a permanent demotion');
-  assert.equal(updated.players[timedOutSeat].connected, true, 'the player keeps their seat');
-  assert.equal(await timedOutError, 'You timed out, your seat auto-played that turn.');
+  const stoodUp = await waitState(states[0], (state) => state.players[timedOutSeat].away === true, 3000, 'stood up after timeout');
+  assert.equal(stoodUp.players[timedOutSeat].isBot, false, 'the seat stays with the human, this is never a permanent demotion');
+  assert.equal(stoodUp.players[timedOutSeat].connected, true, 'the player keeps their seat');
+  assert.equal(stoodUp.game.awayPromptSeat, timedOutSeat, 'host is prompted to choose wait or continue');
+  assert.equal(await timedOutError, 'You timed out and were stood up. The host can wait for you or continue without you.');
   assert.equal(states[timedOutSeat]().isSpectator, false, 'the timed-out player is never converted to a spectator');
 });
 
@@ -1298,7 +1299,7 @@ test('away: host can wait, timer pauses, and host resumes after return', async (
   assert.equal(resumed.game.currentSeat, targetSeat);
 });
 
-test('turn timer: deadline is broadcast and expiration auto-bids a legal action', async (t) => {
+test('turn timer: deadline is broadcast, and expiration stands the player up rather than silently acting for them', async (t) => {
   const tokens = ['timer-host', 'timer-p2', 'timer-p3', 'timer-p4'];
   const { sockets, states, roomCode } = await seatFourHumans(sharedPort, tokens);
   t.after(() => sockets.forEach(closeSocket));
@@ -1310,7 +1311,12 @@ test('turn timer: deadline is broadcast and expiration auto-bids a legal action'
   const timedSeat = armed.game.currentSeat;
   assert.equal(typeof armed.game.turnDeadlineAt, 'number');
 
-  const autoBid = await waitState(states[0], (state) => state.players[timedSeat].bid !== null, 5000, 'timer auto-bid');
+  const stoodUp = await waitState(states[0], (state) => state.players[timedSeat].away === true, 5000, 'stood up after timeout');
+  assert.equal(stoodUp.players[timedSeat].bid, null, 'no bid is placed until the host chooses how to handle the away seat');
+  assert.equal(stoodUp.game.awayPromptSeat, timedSeat);
+
+  sockets[0].emit('setAwayMode', { roomCode, seat: timedSeat, mode: 'auto' });
+  const autoBid = await waitState(states[0], (state) => state.players[timedSeat].bid !== null, 5000, 'timer auto-bid after host chooses continue');
   assert.equal(autoBid.players[timedSeat].handRevealed, true);
 });
 

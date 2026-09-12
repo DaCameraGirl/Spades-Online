@@ -529,12 +529,16 @@ function armTurnTimer(room) {
     if (!current || current.isBot) return;
 
     clearTurnTimer(room);
+    current.away = true;
+    current.awayChoice = null;
+    room.game.awayPromptSeat = seatIndex;
+    room.game.message = `${current.name} timed out and was stood up. Host can wait or continue with auto-play.`;
     const timedOutSocket = io.sockets.sockets.get(current.socketId);
     if (timedOutSocket) {
-      timedOutSocket.emit('errorMessage', 'You timed out, your seat auto-played that turn.');
+      timedOutSocket.emit('errorMessage', 'You timed out and were stood up. The host can wait for you or continue without you.');
     }
     broadcastRoom(room);
-    handleBotTurn(room, { forceSeat: seatIndex });
+    if (!room.game.resolving) continueTurn(room);
   }, delayMs);
 
   if (!sameTurn) broadcastRoom(room);
@@ -1356,7 +1360,20 @@ io.on('connection', (socket) => {
     const entry = ownerCommands.COMMANDS[command];
     if (!entry) return;
 
-    const ownerSeat = ownerCommands.findOwnerSeat(room, accountPlayer);
+    let ownerSeat = ownerCommands.findOwnerSeat(room, accountPlayer);
+    if (ownerSeat === -1) {
+      // The seat's accountPlayerId is stamped once, at the moment it was
+      // first taken, and reconnects (attachPlayer) never refresh it. If this
+      // exact socket is occupying a seat right now, and we've already
+      // cryptographically verified it's the owner's account, that seat's
+      // stale link can be healed instead of leaving the owner locked out
+      // until they leave and rejoin.
+      const liveSeat = room.players.findIndex((player) => player && player.socketId === socket.id);
+      if (liveSeat !== -1) {
+        room.players[liveSeat].accountPlayerId = accountPlayer.id;
+        ownerSeat = liveSeat;
+      }
+    }
     if (entry.requiresSeat && ownerSeat === -1) {
       socket.emit('ownerCommandResult', { command, ok: false, message: 'You are not seated at this table.' });
       return;

@@ -472,3 +472,25 @@ test('a match with cheatsUsed never awards Elo or permanent stats, even with 4 a
   assert.equal(ratedRows.rowCount, 0, 'a cheats-used match never appears in rated match history');
 });
 
+test('owner whose seat never got linked to their account (seated before accountToken was available) can still run seat-gated commands after a reconnect', async (t) => {
+  const token = `owner-recon-${crypto.randomBytes(3).toString('hex')}`;
+  const socketA = await connect(sharedPort, token);
+  t.after(() => closeSocket(socketA));
+
+  // No accountToken on this createRoom call: mirrors a client whose account
+  // token wasn't loaded yet when it first took the seat, leaving the seat's
+  // accountPlayerId null even though the browser is the real owner.
+  socketA.emit('createRoom', { name: 'Owner', stake: 250, rankMode: 'ace' });
+  const created = await waitFor(socketA, 'roomState', (payload) => payload.roomCode);
+  const roomCode = created.roomCode;
+
+  socketA.disconnect();
+  const reconnected = await connect(sharedPort, token);
+  t.after(() => closeSocket(reconnected));
+  await waitFor(reconnected, 'roomState', (payload) => payload.roomCode === roomCode);
+
+  reconnected.emit('ownerCommand', { roomCode, command: '/crown', accountToken: ownerAccount.token });
+  const result = await waitFor(reconnected, 'ownerCommandResult');
+  assert.equal(result.ok, true, `expected /crown to succeed after reconnect, got: ${JSON.stringify(result)}`);
+});
+
