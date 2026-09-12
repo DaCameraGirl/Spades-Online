@@ -179,6 +179,16 @@ h1 {
   letter-spacing: 0.16em;
 }
 
+.site-credit {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.site-credit a {
+  color: var(--gold-strong);
+}
+
 .app-shell {
   max-width: 1180px;
   margin: 0 auto;
@@ -717,6 +727,10 @@ body.room-browsing .content {
   gap: 10px;
   min-width: 220px;
   padding: 14px;
+}
+
+.table-options-menu.hidden {
+  display: none;
 }
 
 .table-options-close {

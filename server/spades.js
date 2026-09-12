@@ -168,19 +168,19 @@ function matchWinningTeam(totalScores, target) {
   return team0 > team1 ? 0 : 1;
 }
 
-function teamContractForSeats(seats, bids) {
+function teamContractForSeats(seats, bids, { tenFor200Enabled = true } = {}) {
   const contractBid = seats.reduce((sum, seat) => {
     const bid = bids[seat];
     return bid === 0 ? sum : sum + (bid || 0);
   }, 0);
   return {
     bid: contractBid,
-    tenFor200: contractBid === 10,
+    tenFor200: tenFor200Enabled && contractBid === 10,
   };
 }
 
 function scoreTeamSeats(seats, bids, tricksBySeat, specialBids = {}) {
-  const contract = teamContractForSeats(seats, bids);
+  const contract = teamContractForSeats(seats, bids, { tenFor200Enabled: specialBids.tenFor200Enabled !== false });
   const tricksWon = seats.reduce((sum, seat) => sum + (tricksBySeat[seat] || 0), 0);
   const nilScore = seats.reduce((sum, seat) => {
     if (bids[seat] !== 0) return sum;

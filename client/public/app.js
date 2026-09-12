@@ -68,6 +68,7 @@ const tableStakeSelect = document.getElementById('tableStakeSelect');
 const allowNilToggle = document.getElementById('allowNilToggle');
 const blindNilThresholdSelect = document.getElementById('blindNilThresholdSelect');
 const lowClubLeadToggle = document.getElementById('lowClubLeadToggle');
+const tenFor200Toggle = document.getElementById('tenFor200Toggle');
 const allowWatchersToggle = document.getElementById('allowWatchersToggle');
 const tableOptionsGroup = document.getElementById('tableOptionsGroup');
 const tableOptionsWrap = document.getElementById('tableOptionsWrap');
@@ -1025,6 +1026,7 @@ function sendTableOptions() {
     stake: tableStakeSelect ? Number(tableStakeSelect.value) : roomState.stake,
     allowNil: allowNilToggle ? allowNilToggle.checked : roomState.allowNil !== false,
     lowClubLead: lowClubLeadToggle ? lowClubLeadToggle.checked : Boolean(roomState.lowClubLead),
+    tenFor200Enabled: tenFor200Toggle ? tenFor200Toggle.checked : roomState.tenFor200Enabled !== false,
     allowWatchers: allowWatchersToggle ? allowWatchersToggle.checked : roomState.allowWatchers !== false,
     blindNilThreshold: blindNilThresholdSelect ? Number(blindNilThresholdSelect.value) : roomState.blindNilThreshold,
   });
@@ -1075,6 +1077,10 @@ function render() {
   if (lowClubLeadToggle) {
     lowClubLeadToggle.disabled = !canChangeTableOptions;
     lowClubLeadToggle.checked = Boolean(roomState.lowClubLead);
+  }
+  if (tenFor200Toggle) {
+    tenFor200Toggle.disabled = !canChangeTableOptions;
+    tenFor200Toggle.checked = roomState.tenFor200Enabled !== false;
   }
   if (blindNilThresholdSelect) {
     blindNilThresholdSelect.disabled = !canChangeTableOptions;
@@ -1527,6 +1533,7 @@ if (voiceSelect) {
 if (tableStakeSelect) tableStakeSelect.addEventListener('change', sendTableOptions);
 if (allowNilToggle) allowNilToggle.addEventListener('change', sendTableOptions);
 if (lowClubLeadToggle) lowClubLeadToggle.addEventListener('change', sendTableOptions);
+if (tenFor200Toggle) tenFor200Toggle.addEventListener('change', sendTableOptions);
 if (blindNilThresholdSelect) blindNilThresholdSelect.addEventListener('change', sendTableOptions);
 if (allowWatchersToggle) allowWatchersToggle.addEventListener('change', sendTableOptions);
 if (ownerMenuBtn && ownerMenu) {

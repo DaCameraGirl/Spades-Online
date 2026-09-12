@@ -77,6 +77,7 @@ function seedLobbyTables() {
         rankMode: 'ace',
         allowNil: true,
         lowClubLead: false,
+        tenFor200Enabled: true,
         allowWatchers: true,
         blindNilThreshold: 150,
         status: 'lobby',
@@ -261,6 +262,7 @@ function loadRooms() {
     room.locked = Boolean(room.locked);
     room.allowNil = room.allowNil !== false;
     room.lowClubLead = Boolean(room.lowClubLead);
+    room.tenFor200Enabled = room.tenFor200Enabled !== false;
     room.allowWatchers = room.allowWatchers !== false;
     room.graceTimers = new Map();
     room.kickVotes = new Map();
@@ -356,10 +358,10 @@ function gameIsActive(room) {
   return Boolean(room && room.game && room.status === 'playing' && room.game.phase !== 'finished' && !room.game.matchOver);
 }
 
-function teamContractsForBids(bids) {
+function teamContractsForBids(bids, { tenFor200Enabled = true } = {}) {
   return {
-    0: teamContractForSeats([0, 2], bids),
-    1: teamContractForSeats([1, 3], bids),
+    0: teamContractForSeats([0, 2], bids, { tenFor200Enabled }),
+    1: teamContractForSeats([1, 3], bids, { tenFor200Enabled }),
   };
 }
 
@@ -383,6 +385,7 @@ function createRoom() {
     rankMode: 'ace',
     allowNil: true,
     lowClubLead: false,
+    tenFor200Enabled: true,
     allowWatchers: true,
     blindNilThreshold: 150,
     status: 'lobby',
@@ -613,8 +616,8 @@ function finishHand(room) {
 
   clearTurnTimer(room);
   const tricksBySeat = room.game.tricksBySeat || { 0: 0, 1: 0, 2: 0, 3: 0 };
-  const specialBids = { blindNil: room.game.blindNil || {} };
-  const teamContracts = teamContractsForBids(room.game.bids || {});
+  const specialBids = { blindNil: room.game.blindNil || {}, tenFor200Enabled: room.tenFor200Enabled !== false };
+  const teamContracts = teamContractsForBids(room.game.bids || {}, { tenFor200Enabled: room.tenFor200Enabled !== false });
   const team0Score = scoreTeamSeats([0, 2], room.game.bids, tricksBySeat, specialBids);
   const team1Score = scoreTeamSeats([1, 3], room.game.bids, tricksBySeat, specialBids);
 
@@ -703,7 +706,7 @@ function applyBid(room, player, bid, { blindNil = false } = {}) {
     room.game.trick = [];
     room.game.spadesBroken = false;
     room.game.tricksWon = { 0: 0, 1: 0 };
-    room.game.teamContracts = teamContractsForBids(room.game.bids);
+    room.game.teamContracts = teamContractsForBids(room.game.bids, { tenFor200Enabled: room.tenFor200Enabled !== false });
     room.game.message = room.lowClubLead ? 'Bidding complete. Low club leads.' : 'Bidding complete. Left of dealer leads.';
   } else {
     room.game.currentSeat = nextSeat(player.seat);
@@ -840,7 +843,7 @@ function handleBotTurn(room, { forceSeat = null } = {}) {
       room.game.currentSeat,
       room.rankMode,
       room.game.bids,
-      { tricksBySeat: room.game.tricksBySeat || {}, teamContracts: room.game.teamContracts || teamContractsForBids(room.game.bids || {}) }
+      { tricksBySeat: room.game.tricksBySeat || {}, teamContracts: room.game.teamContracts || teamContractsForBids(room.game.bids || {}, { tenFor200Enabled: room.tenFor200Enabled !== false }) }
     ) || current.hand[0];
     const cardIndex = current.hand.findIndex((entry) => entry.code === card.code);
     if (cardIndex === -1) return false;
@@ -1000,7 +1003,7 @@ function buildPlayerPayload(room, socketId) {
         leadSuit: room.game.leadSuit,
         bids: room.game.bids,
         blindNil: room.game.blindNil || { 0: false, 1: false, 2: false, 3: false },
-        teamContracts: room.game.teamContracts || teamContractsForBids(room.game.bids || {}),
+        teamContracts: room.game.teamContracts || teamContractsForBids(room.game.bids || {}, { tenFor200Enabled: room.tenFor200Enabled !== false }),
         scores: room.game.totalScores || { 0: 0, 1: 0 },
         round: room.game.round,
         message: room.game.message,
@@ -1031,6 +1034,7 @@ function buildPlayerPayload(room, socketId) {
     rankMode: room.rankMode || 'ace',
     allowNil: room.allowNil !== false,
     lowClubLead: Boolean(room.lowClubLead),
+    tenFor200Enabled: room.tenFor200Enabled !== false,
     allowWatchers: room.allowWatchers !== false,
     blindNilThreshold: room.blindNilThreshold || 150,
     players,
@@ -1501,7 +1505,7 @@ io.on('connection', (socket) => {
     armTurnTimer(room);
   });
 
-  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, allowWatchers, blindNilThreshold }) => {
+  socket.on('setTableOptions', ({ roomCode, stake, allowNil, lowClubLead, tenFor200Enabled, allowWatchers, blindNilThreshold }) => {
     const room = getRoomByCode(roomCode);
     if (!room) return;
     if (room.hostSocketId !== socket.id) {
@@ -1516,6 +1520,7 @@ io.on('connection', (socket) => {
       const styleChanged = (stake !== undefined && STAKES.includes(Number(stake)) && Number(stake) !== room.stake)
         || (allowNil !== undefined && (allowNil !== false) !== (room.allowNil !== false))
         || (lowClubLead !== undefined && Boolean(lowClubLead) !== Boolean(room.lowClubLead))
+        || (tenFor200Enabled !== undefined && (tenFor200Enabled !== false) !== (room.tenFor200Enabled !== false))
         || (blindNilThreshold !== undefined && BLIND_NIL_THRESHOLDS.includes(Number(blindNilThreshold)) && Number(blindNilThreshold) !== room.blindNilThreshold);
       if (styleChanged) {
         socket.emit('errorMessage', 'Finish the current hand before changing scoring or lead options.');
@@ -1528,6 +1533,7 @@ io.on('connection', (socket) => {
     if (STAKES.includes(nextStake)) room.stake = nextStake;
     if (allowNil !== undefined) room.allowNil = allowNil !== false;
     if (lowClubLead !== undefined) room.lowClubLead = Boolean(lowClubLead);
+    if (tenFor200Enabled !== undefined) room.tenFor200Enabled = tenFor200Enabled !== false;
     if (blindNilThreshold !== undefined && BLIND_NIL_THRESHOLDS.includes(Number(blindNilThreshold))) {
       room.blindNilThreshold = Number(blindNilThreshold);
     }
